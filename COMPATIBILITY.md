@@ -1,114 +1,204 @@
 # Claude Code Compatibility Guide
 
-This document tracks compatibility between Memberberries and Claude Code's evolving features, ensuring they work together effectively without redundancy.
+This document explains how Memberberries integrates with Claude Code and ensures they work together seamlessly.
+
+## How Memberberries Works With Claude Code
+
+Memberberries enhances Claude Code through **native integration**:
+
+```
+$ member "implement auth"
+      ↓
+[1] Syncs relevant memories → CLAUDE.md (memberberries section)
+[2] Launches Claude Code
+      ↓
+Every prompt you type:
+  → [UserPromptSubmit Hook] Updates CLAUDE.md with relevant context
+  → Claude processes your prompt with fresh memories
+  → [Stop Hook] Auto-extracts insights from Claude's response
+      ↓
+Memory builds automatically as you work
+```
+
+### The Integration
+
+Memberberries manages a **dedicated section** at the bottom of your `CLAUDE.md`:
+
+```markdown
+# My Project
+
+## Project Overview
+Your static project description...
+
+## Conventions
+Your coding standards...
+
+---
+
+<!-- MEMBERBERRIES CONTEXT - Auto-managed, do not edit below this line -->
+
+*Context synced: 2024-01-15 10:30*
+*Query: implement authentication*
+
+## Your Preferences
+- **coding_style**: Always use type hints
+
+## Relevant Solutions
+- **JWT refresh tokens**: Store in Redis with 7-day TTL
+
+<!-- END MEMBERBERRIES -->
+```
+
+**Key points:**
+- Your content above the delimiter is **never touched**
+- Memberberries only manages its own section
+- Context updates automatically on every prompt via hooks
 
 ## Feature Comparison
 
-| Feature | Claude Code | Memberberries | Recommendation |
-|---------|-------------|---------------|----------------|
-| **Project Instructions** | `CLAUDE.md` files | Project context | Use CLAUDE.md for instructions, Memberberries for decisions/history |
-| **Conversation Context** | Session-based | Persistent across sessions | Memberberries for long-term memory |
-| **Memory Commands** | `/memory` (if available) | `concentrate-*` / `juice-*` | Check for overlap, prefer native if equivalent |
-| **Preferences** | Settings/config | Preference berries | Use Memberberries for coding-style preferences |
+| Feature | Claude Code Native | Memberberries | How They Work Together |
+|---------|-------------------|---------------|------------------------|
+| **Project Instructions** | `CLAUDE.md` (static) | Dynamic context section | Memberberries adds to CLAUDE.md, doesn't replace |
+| **Session Memory** | Within conversation | Persistent across sessions | Memberberries bridges sessions |
+| **Context Loading** | Reads CLAUDE.md at start | Syncs on every prompt | Hooks keep context fresh |
+| **Learning** | None | Auto-captures insights | Stop hook extracts from responses |
+| **Semantic Search** | None | Full semantic search | Find relevant memories by meaning |
 
-## How They Complement Each Other
+## The Hook System
 
-### CLAUDE.md vs Memberberries
+Memberberries uses Claude Code's native hook system:
 
-**CLAUDE.md** (Claude Code native):
-- Static project instructions
-- Read automatically at session start
-- Best for: Project rules, coding standards, architecture overview
+### UserPromptSubmit Hook
+- **When**: Before each prompt is processed
+- **What**: Syncs relevant memories based on your prompt
+- **How**: Updates the memberberries section of CLAUDE.md
 
-**Memberberries Project Context**:
-- Dynamic, can be updated during sessions
-- Semantic search across all projects
-- Best for: Architecture decisions, tech stack rationale, conventions
+### Stop Hook
+- **When**: After Claude finishes responding
+- **What**: Extracts insights from the conversation
+- **How**: Auto-concentrates solutions, patterns, and learnings
 
-**Recommendation**: Use both together:
-1. Put static rules in `CLAUDE.md`
-2. Store decision history and "why" in Memberberries
-3. Cross-reference when juicing context
+### Semantic Signal Detection
 
-### Session Context vs Memberberries
+The auto-concentrate system monitors for strategic signals:
 
-**Claude Code Sessions**:
-- Context within a single conversation
-- Lost when session ends
-- Automatic, no user action needed
+| Signal | Examples | Priority |
+|--------|----------|----------|
+| **Repetition** | "again", "still", "keep getting" | Highest (was forgotten!) |
+| **Success** | "that worked", "perfect", "thanks" | High (confirmed solution) |
+| **Emphasis** | "important", "remember", "critical" | High (explicit request) |
+| **Request** | "please", "help me", "how do I" | Medium (user need) |
+| **Failure** | "doesn't work", "broke", "error" | Medium (learning opportunity) |
 
-**Memberberries Sessions**:
-- Persists across conversations
-- Requires explicit concentrate/juice
-- Searchable history
+## Setup Verification
 
-**Recommendation**: Use Memberberries to bridge sessions:
+After running `member setup`, verify integration:
+
 ```bash
-# End of session
-python memberberries.py concentrate-session \
-  "Implemented OAuth2 flow" \
-  -l "Use PKCE for mobile|Refresh tokens in Redis"
-
-# Start of next session
-python juice.py "continue OAuth implementation"
+member --status
 ```
 
-## Avoiding Redundancy
+Should show:
+```
+Memberberries Status
+   Project: /path/to/your/project
+   Storage: ~/.memberberries
+   CLAUDE.md: exists
+   Claude Code: installed
+   Hooks: configured    ← Important!
 
-### When to Use Memberberries
+   Memories:
+     - solutions: 5
+     - preferences: 3
+     ...
+```
 
-Use Memberberries when:
-- Information should persist across multiple sessions
-- You want semantic search across memories
-- Content is dynamic and evolves over time
-- You need cross-project knowledge sharing
+Check hooks are registered:
+```bash
+# In Claude Code, run:
+/hooks
+```
 
-### When to Use Claude Code Native Features
+Should list `UserPromptSubmit` and `Stop` hooks pointing to memberberries scripts.
 
-Use native features when:
-- Claude Code offers equivalent functionality
-- The feature is automatic (no manual steps)
-- It's tightly integrated with the session
+## Avoiding Conflicts
 
-### Overlap Detection
+### Do's
+- Use the **top section** of CLAUDE.md for static project rules
+- Let memberberries manage the **bottom section** automatically
+- Start sessions with `member` instead of `claude`
+- Trust the automatic memory capture
 
-Run `python memberberries.py check-compatibility` to:
-- Detect `CLAUDE.md` files in your project
-- Identify potential overlaps
-- Get suggestions for optimal usage
+### Don'ts
+- Don't manually edit the memberberries section (between the delimiters)
+- Don't duplicate information in both sections
+- Don't run `claude` directly if you want memory features (use `member`)
 
-## Version Compatibility Matrix
+## When to Use What
 
-| Memberberries Version | Claude Code Features | Notes |
-|-----------------------|----------------------|-------|
-| v1.0 | Basic sessions | Fully complementary |
-| v1.1 | CLAUDE.md files | Use together, avoid duplication |
-| v1.1+ | Future /memory commands | Monitor for overlap |
+### Put in CLAUDE.md (top section):
+- Project name and description
+- Architecture overview
+- Coding standards and conventions
+- File structure explanations
+- Static rules that never change
 
-## Monitoring Claude Code Updates
+### Let Memberberries Handle:
+- Solutions you've discovered
+- Error patterns and fixes
+- What worked and what didn't
+- Preferences that evolve
+- Session-to-session context
 
-To stay compatible:
-1. Check Claude Code release notes for memory-related features
-2. Run `check-compatibility` after Claude Code updates
-3. Report compatibility issues at [GitHub Issues](https://github.com/wylloh/memberberries/issues)
+## Version Compatibility
 
-## Migration Guidance
+| Memberberries | Claude Code | Status |
+|---------------|-------------|--------|
+| v1.1+ | Current | Full integration via hooks |
+| v1.0 | All | Manual workflow (copy-paste) |
+
+## Troubleshooting
+
+### "Hooks not configured"
+```bash
+# Re-run setup
+member setup
+
+# Or manually in your project:
+cd /your/project
+python3 /path/to/memberberries/member.py setup
+```
+
+### "Context not updating"
+1. Check hooks: Run `/hooks` in Claude Code
+2. Verify paths in `.claude/settings.json`
+3. Check hook scripts are executable: `ls -la .claude/hooks/`
+
+### "CLAUDE.md has conflicts"
+The memberberries section is between special delimiters. If you see issues:
+```bash
+# Clean the memberberries section
+member --clean
+
+# Re-sync
+member --sync-only
+```
+
+## Future Claude Code Features
 
 If Claude Code adds native memory features:
 
-1. **Evaluate overlap**: Does it replace Memberberries functionality?
-2. **Export data**: Use `python memberberries.py export backup.json`
-3. **Gradual migration**: Run both in parallel during transition
-4. **Keep unique features**: Memberberries may still offer unique value (semantic search, extended types)
+1. **We'll adapt**: Memberberries will integrate, not compete
+2. **Unique value remains**: Semantic search, cross-project memory, auto-extraction
+3. **Migration path**: Export your memories anytime with `memberberries.py export`
 
-## Reporting Compatibility Issues
+## Reporting Issues
 
-If you encounter compatibility issues:
+If you encounter compatibility problems:
 
-1. Check this document for known interactions
-2. Run `python memberberries.py check-compatibility`
-3. Create an issue with:
+1. Run `member --status` and note the output
+2. Check `.claude/settings.json` for hook configuration
+3. Create an issue at [github.com/wylloh/memberberries/issues](https://github.com/wylloh/memberberries/issues) with:
+   - Your `member --status` output
    - Claude Code version
-   - Memberberries version
-   - Description of the conflict
-   - Steps to reproduce
+   - Description of the issue
