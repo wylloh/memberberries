@@ -42,37 +42,21 @@ Instead of starting fresh every time, Claude Code picks up where you left off.
 
 ## Quick Start
 
-### New Users (Don't have Claude Code yet)
-
 ```bash
-# Clone memberberries
+# Clone and run setup
 git clone https://github.com/wylloh/memberberries.git
 cd memberberries
-
-# Run the setup wizard - it will guide you through everything
-python3 member.py setup
+bash setup.sh
 ```
 
 The setup wizard will:
-1. Check if Claude Code is installed (and help you install it if not)
-2. Run an interactive project setup to create your CLAUDE.md
-3. Configure hooks so context syncs on every prompt
-4. Install the `member` command globally
+1. Install dependencies
+2. Check for Claude Code (help install if needed)
+3. Run interactive project setup
+4. Configure hooks for automatic context sync
+5. Install the `member` command globally
 
-### Existing Claude Code Users
-
-```bash
-# Clone memberberries
-git clone https://github.com/wylloh/memberberries.git
-cd memberberries
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run setup in your project directory
-cd ~/your-project
-python3 /path/to/memberberries/member.py setup
-```
+See [QUICKSTART.md](QUICKSTART.md) for the full guide.
 
 ### Seamless Workflow
 

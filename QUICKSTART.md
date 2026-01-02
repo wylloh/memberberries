@@ -1,262 +1,147 @@
-# Quick Start: Claude Code Integration
+# Quick Start Guide
 
-## 60-Second Setup
+Get memberberries working in under 2 minutes.
 
-```bash
-# 1. Navigate to the memory system
-cd /path/to/claude-code-memory
-
-# 2. Test it works
-python3 claude_memory.py stats
-
-# 3. Add your first preference
-python3 claude_memory.py add-pref coding_style "Your preference here" -t python
-```
-
-## Three Ways to Use With Claude Code
-
-### Method 1: Copy-Paste (Easiest)
-
-**Before starting Claude Code:**
+## Installation
 
 ```bash
-# Get context for your task
-python3 integration.py "your task description" /path/to/project
+# Clone the repository
+git clone https://github.com/wylloh/memberberries.git
+cd memberberries
 
-# Copy the output and paste it as your first message to Claude Code
+# Run setup (installs dependencies + launches wizard)
+bash setup.sh
 ```
 
-**Example:**
-```bash
-$ python3 integration.py "add API rate limiting" ~/my-project
+The wizard will:
+1. Check for Claude Code (help you install if needed)
+2. Set up your project's CLAUDE.md interactively
+3. Configure hooks for automatic context sync
+4. Install the `member` command
 
-# [Context appears - copy everything]
-# Paste into Claude Code chat window
-```
+## Basic Usage
 
-### Method 2: Shell Alias (Recommended)
-
-Add to your `~/.bashrc` or `~/.zshrc`:
-
-```bash
-# Add this function
-claude_context() {
-    python3 /path/to/claude-code-memory/integration.py "$1" "${2:-$(pwd)}"
-}
-
-# Usage:
-# claude_context "implement user auth"
-# claude_context "add rate limiting" ~/projects/my-app
-```
-
-Now before starting Claude Code, run:
-```bash
-claude_context "your task"
-```
-
-### Method 3: Auto-Inject (Advanced)
-
-Create a wrapper script `~/bin/claude-code-with-memory`:
+### Start a Session
 
 ```bash
-#!/bin/bash
-TASK="$1"
-PROJECT="${2:-$(pwd)}"
+# Navigate to your project
+cd ~/my-project
 
-# Get context
-CONTEXT=$(python3 /path/to/claude-code-memory/integration.py "$TASK" "$PROJECT")
+# Start with memberberries context
+member "implement user authentication"
 
-# Start Claude Code with context pre-loaded
-echo "$CONTEXT" | claude-code
-
-# Or save to temp file and reference
-echo "$CONTEXT" > /tmp/claude-context.txt
-echo "Context saved to /tmp/claude-context.txt"
-echo "Paste this content at the start of your Claude Code session"
-cat /tmp/claude-context.txt
+# Or just start with general context
+member
 ```
 
-## Daily Workflow
+That's it! You're now in Claude Code with your memories loaded.
 
-### Morning (Starting Work)
+### Context Syncs Automatically
+
+Every prompt you type in Claude Code will:
+1. Trigger the memberberries hook
+2. Search for relevant memories
+3. Update CLAUDE.md with fresh context
+4. Claude sees your memories before responding
+
+No manual steps needed during your session.
+
+## Automatic Memory Building
+
+Memberberries automatically captures insights as you work:
+
+- **Solutions** - When Claude explains how to fix something
+- **Error patterns** - When you encounter and resolve errors
+- **Antipatterns** - When Claude warns against certain approaches
+- **Dependencies** - When packages are recommended
+
+You don't need to do anything - just code normally and your memory builds itself.
+
+### How It Works
+
+```
+You type a prompt
+    ↓
+[Hook 1: Sync] - Loads relevant memories into CLAUDE.md
+    ↓
+Claude responds
+    ↓
+[Hook 2: Concentrate] - Extracts and stores new insights
+    ↓
+Next prompt has even better context
+```
+
+### Optional Manual Entry
+
+If you want to explicitly store something:
 
 ```bash
-# Check what you worked on yesterday
-python3 claude_memory.py context "continue yesterday's work" -p ~/project
+# Store a preference
+python3 memberberries.py concentrate coding_style \
+  "Always use type hints" -t python
 
-# Start Claude Code with this context
+# Store a session summary
+python3 memberberries.py concentrate-session \
+  "What I accomplished today"
 ```
 
-### During Coding
+But this is optional - the system learns automatically.
 
-When you discover something useful:
+## Useful Commands
+
+| Command | What it does |
+|---------|-------------|
+| `member` | Start session with context |
+| `member "task"` | Start session focused on task |
+| `member --status` | Show memberberries status |
+| `member init` | Re-run project setup wizard |
+| `member --clean` | Remove memberberries from CLAUDE.md |
+| `python3 memberberries.py stats` | Show memory statistics |
+| `python3 memberberries.py search "query"` | Search your memories |
+
+## Project Setup
+
+If you need to set up a new project:
 
 ```bash
-# Save the insight immediately
-python3 claude_memory.py add-solution \
-  "Problem description" \
-  "How you solved it" \
-  -t relevant,tags \
-  -c "code snippet if relevant"
+cd ~/new-project
+member init
 ```
 
-### End of Day
+The wizard will:
+- Auto-detect your tech stack
+- Suggest architecture based on structure
+- Let you add conventions and notes
+- Create a populated CLAUDE.md
 
-```bash
-# Save session summary
-python3 claude_memory.py save-session \
-  "Today's accomplishments" \
-  -l "key learning 1|key learning 2|key learning 3" \
-  -p ~/project
-```
+## Tips
 
-## Best Practices
-
-### 1. Start Every Session With Context
-
-**Bad:**
-```
-You: "Help me add authentication"
-Claude Code: [starts from scratch]
-```
-
-**Good:**
-```bash
-# First, get context:
-python3 integration.py "add authentication" ~/project
-```
-```
-You: [Paste context]
-I need to add authentication to my FastAPI project.
-
-Context from previous work:
-[Memory system's output]
-
-Please suggest an implementation approach.
-```
-
-### 2. Save Insights As They Happen
-
-Don't wait until the end. The moment you solve something:
-
-```bash
-python3 claude_memory.py add-solution \
-  "How to handle CORS in production" \
-  "Use specific origins, not wildcard. Set credentials=True for cookies" \
-  -t fastapi,cors,security
-```
-
-### 3. Keep Project Context Updated
-
-When architecture changes:
-
-```bash
-python3 claude_memory.py add-project ~/my-project \
-  -n "My Project" \
-  -d "Updated description" \
-  -a "New architectural decision"
-```
-
-### 4. Use Consistent Tags
-
-Create a personal tagging convention:
-- Language: `python`, `javascript`, `rust`
-- Framework: `fastapi`, `react`, `django`
-- Domain: `auth`, `database`, `api`, `testing`
-- Type: `security`, `performance`, `bug-fix`
-
-### 5. Regular Searches
-
-Before asking Claude Code:
-
-```bash
-# Search your memory first
-python3 claude_memory.py search "your problem"
-
-# If you find a solution, great!
-# If not, ask Claude Code and then save the solution
-```
-
-##  Example Session
-
-```bash
-# 1. Morning: Start new feature
-$ python3 integration.py "implement password reset flow" ~/my-app
-
-Loading relevant memory...
-✓ Context loaded
-
-# [Copy output, paste into Claude Code]
-
-# 2. During: Save breakthrough
-$ python3 claude_memory.py add-solution \
-  "How to securely generate password reset tokens" \
-  "Use secrets.token_urlsafe(32) with expiry in Redis" \
-  -t python,security,auth \
-  -c "token = secrets.token_urlsafe(32)"
-
-Insight saved: a3f8c2e1b4d7
-
-# 3. During: Update project
-$ python3 claude_memory.py add-project ~/my-app \
-  -n "My App" \
-  -d "Added password reset functionality"
-
-Project context updated
-
-# 4. End of day: Save session
-$ python3 claude_memory.py save-session \
-  "Implemented password reset with email tokens" \
-  -l "Use Redis for token storage with TTL|SendGrid has rate limits - add retry logic|Always invalidate token after use" \
-  -p ~/my-app
-
-Session saved
-```
+1. **Just start coding** - Memories are captured automatically
+2. **Use `member` instead of `claude`** - Ensures hooks are active
+3. **Check your memories** - Run `member --status` to see what's stored
+4. **It gets smarter over time** - The more you use it, the better context you get
 
 ## Troubleshooting
 
-**"No context found"**
-- You need to add preferences and solutions first
-- Run the demo: `python3 demo.py`
+**"Building your memory..."**
+- This is normal for new projects
+- Memories are captured automatically as you work
+- The more you use memberberries, the richer your context
 
-**"Search returns irrelevant results"**
-- Use more specific tags
-- Consider upgrading to better embeddings (see README)
+**"claude command not found"**
+- Run `member setup` to install Claude Code
 
-**"Context is too long for Claude Code"**
-- Edit `integration.py` and reduce `top_k` values
-- Be more specific in your task description
+**"Hooks not working"**
+- Check status: `member --status`
+- Re-run setup: `member setup`
 
-**"Want to start fresh"**
-```bash
-# Backup first
-python3 claude_memory.py export ~/backup.json
+## Next Steps
 
-# Then remove memory
-rm -rf ~/.claude-code-memory
-```
-
-## 🎓 Learning Resources
-
-- Full README: `README.md`
-- Demo script: `python3 demo.py`
-- View stored data: `ls ~/.claude-code-memory/`
-- All commands: `python3 claude_memory.py --help`
-
-## Pro Tips
-
-1. **Alias Everything**: Add shell aliases for common operations
-2. **Tag Consistently**: Develop your own tagging taxonomy
-3. **Search First**: Before asking Claude, search your memory
-4. **Save Immediately**: Don't wait to save insights
-5. **Review Weekly**: Run stats and review what you've learned
-6. **Backup Monthly**: Export your memory regularly
+1. Start using `member` instead of `claude`
+2. Store your first preference or solution
+3. Watch your context improve over time
+4. See [README.md](README.md) for advanced features
 
 ---
 
-**Next Steps:**
-1. Run `python3 demo.py` to see it in action
-2. Add your first real preference
-3. Use it with Claude Code on your next task
-4. Save what you learn
-5. Watch your productivity improve!
+*Member when you had to repeat yourself every session?*

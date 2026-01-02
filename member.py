@@ -491,10 +491,10 @@ class ClaudeMDManager:
             if project_ctx.get('tech_stack'):
                 sections.append(f"- **Tech Stack**: {', '.join(project_ctx['tech_stack'])}")
 
-        # If no content was generated, add a note
+        # If no content was generated, show a friendly message
         if len(sections) <= 2:  # Only header lines
-            sections.append("\n*No relevant memberberries found for this context.*")
-            sections.append("*Use `memberberries.py concentrate-*` commands to build your memory.*")
+            sections.append("\n*Building your memory...*")
+            sections.append("*Insights will be captured automatically as you work.*")
 
         return "\n".join(sections)
 
@@ -597,33 +597,47 @@ After installation, run 'member setup' again to complete memberberries setup.
         # Create directories
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create hook script
-        hook_script = hooks_dir / "sync-memberberries.sh"
-        hook_content = f'''#!/bin/bash
+        # Create sync hook (runs before each prompt)
+        sync_script = hooks_dir / "sync-memberberries.sh"
+        sync_content = f'''#!/bin/bash
 # Memberberries sync hook - runs on every prompt
 # Syncs relevant memories based on the user's prompt
 
-# Read JSON input from stdin
 INPUT=$(cat)
-
-# Extract the prompt from the hook input
 PROMPT=$(echo "$INPUT" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('prompt', ''))" 2>/dev/null)
 
-# Only sync if we got a prompt
 if [ -z "$PROMPT" ]; then
   exit 0
 fi
 
-# Run memberberries sync with the user's prompt (quiet mode)
 python3 "{MEMBERBERRIES_DIR}/member.py" --sync-only --query "$PROMPT" --quiet 2>/dev/null
-
-# Always exit 0 to allow the prompt to proceed
 exit 0
 '''
 
-        with open(hook_script, 'w') as f:
-            f.write(hook_content)
-        os.chmod(hook_script, 0o755)
+        with open(sync_script, 'w') as f:
+            f.write(sync_content)
+        os.chmod(sync_script, 0o755)
+
+        # Create auto-concentrate hook (runs after Claude responds)
+        concentrate_script = hooks_dir / "auto-concentrate.sh"
+        concentrate_content = f'''#!/bin/bash
+# Memberberries auto-concentrate hook - runs after Claude responds
+# Automatically extracts and stores memories from the conversation
+
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('transcript_path', ''))" 2>/dev/null)
+
+if [ -z "$TRANSCRIPT" ]; then
+  exit 0
+fi
+
+python3 "{MEMBERBERRIES_DIR}/auto_concentrate.py" --transcript "$TRANSCRIPT" 2>/dev/null
+exit 0
+'''
+
+        with open(concentrate_script, 'w') as f:
+            f.write(concentrate_content)
+        os.chmod(concentrate_script, 0o755)
 
         # Create or update settings.json
         settings = {}
@@ -633,14 +647,28 @@ exit 0
             except:
                 pass
 
-        # Add hook configuration
+        # Add hook configurations
         settings["hooks"] = settings.get("hooks", {})
+
+        # UserPromptSubmit - sync context before each prompt
         settings["hooks"]["UserPromptSubmit"] = [
             {
                 "hooks": [
                     {
                         "type": "command",
-                        "command": str(hook_script)
+                        "command": str(sync_script)
+                    }
+                ]
+            }
+        ]
+
+        # Stop - auto-concentrate after Claude responds
+        settings["hooks"]["Stop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(concentrate_script)
                     }
                 ]
             }
