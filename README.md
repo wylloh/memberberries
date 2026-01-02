@@ -4,7 +4,7 @@
   <img src="Memberberries.svg" alt="Memberberries Logo" width="200"/>
 </p>
 
-### *Member when Claude Code didn't?*
+### *Member when Claude Code... didn't?*
 
 > Persistent memory system for Claude Code - because AI assistants deserve to remember too.
 

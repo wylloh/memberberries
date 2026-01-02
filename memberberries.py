@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Memberberries CLI
-🫐 Member when Claude Code had no memory? We memberberry!
+🫐 Member when Claude Code... didn't?
 
 Allows easy interaction with the berry storage from command line.
 """
