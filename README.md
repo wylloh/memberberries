@@ -52,31 +52,62 @@ cd memberberries
 # Run the setup script
 bash setup.sh
 
-# Or install manually
-pip install -r requirements.txt
-python demo.py
+# Install the 'member' command for seamless integration
+bash install_member.sh
 ```
 
-### Basic Usage
+### Seamless Workflow (Recommended)
 
 ```bash
-# Concentrate a coding preference (store a memory)
+# Instead of just 'claude', use 'member':
+member "implement user authentication"
+
+# That's it! Memberberries automatically:
+# 1. Syncs relevant memories into CLAUDE.md
+# 2. Launches Claude Code
+# 3. Claude reads your personalized context automatically
+```
+
+The `member` command is a drop-in enhancement for `claude`. Your existing CLAUDE.md content is preserved - memberberries manages its own section.
+
+### Building Your Memory
+
+```bash
+# Store a coding preference
 python memberberries.py concentrate coding_style \
   "Always use type hints and docstrings" \
   -t python,style
 
-# Juice some context for your current task (fetch memories)
-python juice.py "implement user authentication" ~/my-project
+# Store a solution you discovered
+python memberberries.py concentrate-solution \
+  "How to handle JWT refresh" \
+  "Use Redis with 7-day expiry" \
+  -t auth,jwt
 
-# Copy the output and paste it into Claude Code
-# Claude now memberberries your preferences, project setup, and past solutions!
+# Store an error pattern you solved
+python memberberries.py concentrate-error \
+  "ModuleNotFoundError: numpy" \
+  "Use conda on M1 Mac, not pip"
 ```
 
 ## How It Works
 
-### Before Claude Code Session
+```
+┌─────────────────────────────────────────────────────────────┐
+│  $ member "implement auth"                                  │
+│     ↓                                                       │
+│  1. Syncs relevant memories → CLAUDE.md                     │
+│  2. Launches: claude                                        │
+│     ↓                                                       │
+│  Claude Code reads CLAUDE.md automatically                  │
+│  (Your context is already there!)                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### What Gets Synced
+
 ```bash
-$ python juice.py "add rate limiting to API" ~/my-project
+$ member "add rate limiting to API"
 
 🫐 Juicing memberberries...
 
