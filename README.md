@@ -37,7 +37,7 @@ Instead of starting fresh every time, Claude Code picks up where you left off.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/memberberries.git
+git clone https://github.com/wylloh/memberberries.git
 cd memberberries
 
 # Run the setup script
@@ -220,9 +220,9 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ## 🔗 Links
 
-- [Report a Bug](https://github.com/yourusername/memberberries/issues)
-- [Request a Feature](https://github.com/yourusername/memberberries/issues)
-- [Discussions](https://github.com/yourusername/memberberries/discussions)
+- [Report a Bug](https://github.com/wylloh/memberberries/issues)
+- [Request a Feature](https://github.com/wylloh/memberberries/issues)
+- [Discussions](https://github.com/wylloh/memberberries/discussions)
 
 ---
 
