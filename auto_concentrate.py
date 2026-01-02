@@ -23,6 +23,58 @@ from berry_manager import BerryManager
 class MemoryExtractor:
     """Extracts memories from conversation text."""
 
+    # === SEMANTIC SIGNALS ===
+    # These indicate important moments worth capturing
+
+    # Signals that a request/need is being expressed
+    REQUEST_SIGNALS = [
+        'please', 'help me', 'how do i', 'how can i', 'can you', 'could you',
+        'i need', 'i want', 'trying to', 'looking for', 'wondering how'
+    ]
+
+    # Signals that something is being repeated (should have been remembered!)
+    REPETITION_SIGNALS = [
+        'again', 'still', 'keep getting', 'keeps happening', 'every time',
+        'always forget', 'remind me', 'one more time', 'as i mentioned',
+        'like before', 'same issue', 'recurring'
+    ]
+
+    # Signals that a solution worked (high-value memories)
+    SUCCESS_SIGNALS = [
+        'that worked', 'works now', 'fixed it', 'solved', 'perfect',
+        'thanks', 'thank you', 'got it', 'makes sense', 'understood',
+        'exactly what i needed', 'great'
+    ]
+
+    # Signals of failure/problems (learning opportunities)
+    FAILURE_SIGNALS = [
+        "doesn't work", "not working", "didn't work", 'broke', 'broken',
+        'wrong', 'failed', 'failing', 'error', 'issue', 'problem',
+        'stuck', 'confused'
+    ]
+
+    # Signals of new learning (worth storing)
+    LEARNING_SIGNALS = [
+        "i didn't know", "til", "today i learned", "good to know",
+        "interesting", "never knew", "new to me", 'discovered',
+        "that's useful", 'noted'
+    ]
+
+    # Signals of best practices/conventions
+    BEST_PRACTICE_SIGNALS = [
+        'always', 'never', 'should', "shouldn't", 'must', "mustn't",
+        'avoid', 'recommended', 'best practice', 'convention',
+        'prefer', 'important to', 'make sure', 'remember to'
+    ]
+
+    # Signals of emphasis (explicit memory requests)
+    EMPHASIS_SIGNALS = [
+        'important', 'critical', 'crucial', "don't forget", 'remember',
+        'note that', 'key thing', 'essential', 'vital', 'must remember'
+    ]
+
+    # === EXTRACTION PATTERNS ===
+
     # Patterns that indicate a solution
     SOLUTION_PATTERNS = [
         r"(?:the solution is|to fix this|the fix is|you can solve this by|here's how to|the way to|to resolve this)(.*?)(?:\.|$)",
@@ -67,6 +119,118 @@ class MemoryExtractor:
 
     def __init__(self):
         self.extracted_memories = []
+
+    def detect_signals(self, text: str) -> Dict[str, bool]:
+        """Detect which semantic signals are present in the text."""
+        text_lower = text.lower()
+        return {
+            'request': any(s in text_lower for s in self.REQUEST_SIGNALS),
+            'repetition': any(s in text_lower for s in self.REPETITION_SIGNALS),
+            'success': any(s in text_lower for s in self.SUCCESS_SIGNALS),
+            'failure': any(s in text_lower for s in self.FAILURE_SIGNALS),
+            'learning': any(s in text_lower for s in self.LEARNING_SIGNALS),
+            'best_practice': any(s in text_lower for s in self.BEST_PRACTICE_SIGNALS),
+            'emphasis': any(s in text_lower for s in self.EMPHASIS_SIGNALS),
+        }
+
+    def calculate_importance(self, text: str) -> int:
+        """Calculate importance score (0-10) based on signals present."""
+        signals = self.detect_signals(text)
+        score = 0
+
+        # High importance signals
+        if signals['repetition']:
+            score += 3  # This was forgotten before - must remember!
+        if signals['emphasis']:
+            score += 2  # Explicitly marked as important
+        if signals['success']:
+            score += 2  # Confirmed working solution
+
+        # Medium importance signals
+        if signals['failure']:
+            score += 1  # Learning opportunity
+        if signals['learning']:
+            score += 1  # New knowledge
+        if signals['best_practice']:
+            score += 1  # Worth following
+
+        return min(score, 10)
+
+    def extract_user_needs(self, text: str) -> List[Dict]:
+        """Extract user needs/requests from 'please' and request patterns."""
+        needs = []
+        text_lower = text.lower()
+
+        # Look for request patterns
+        request_patterns = [
+            r"(?:please|help me|can you|could you)\s+([^.?!]+)[.?!]?",
+            r"(?:i need|i want|trying to)\s+([^.?!]+)[.?!]?",
+            r"(?:how do i|how can i)\s+([^.?!]+)\??",
+        ]
+
+        for pattern in request_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                need = match.group(1).strip()
+                if len(need) > 10:
+                    needs.append({
+                        'type': 'user_need',
+                        'need': need[:200],
+                        'tags': self.extract_tags(need),
+                        'importance': self.calculate_importance(text)
+                    })
+
+        return needs[:3]
+
+    def extract_forgotten_items(self, text: str) -> List[Dict]:
+        """Extract things that were repeated (should have been remembered)."""
+        forgotten = []
+        text_lower = text.lower()
+
+        # Look for repetition indicators
+        repetition_patterns = [
+            r"(?:again|still|keep getting|keeps happening)\s*[,:]?\s*([^.!?]+)[.!?]?",
+            r"(?:same|recurring)\s+(?:issue|problem|error)[:\s]+([^.!?]+)[.!?]?",
+            r"(?:as i mentioned|like before)[,:]?\s*([^.!?]+)[.!?]?",
+        ]
+
+        for pattern in repetition_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                item = match.group(1).strip()
+                if len(item) > 10:
+                    forgotten.append({
+                        'type': 'forgotten_item',
+                        'description': item[:200],
+                        'tags': self.extract_tags(item),
+                        'importance': 10  # High priority - should have been remembered!
+                    })
+
+        return forgotten[:2]
+
+    def extract_confirmed_solutions(self, text: str) -> List[Dict]:
+        """Extract solutions that were confirmed to work."""
+        confirmed = []
+
+        # Look for success + solution patterns
+        success_patterns = [
+            r"(?:that worked|works now|fixed it|solved)[.!]?\s*([^.!?]*(?:by|with|using)[^.!?]+)[.!?]?",
+            r"(?:perfect|exactly what i needed)[.!]?\s*([^.!?]+)[.!?]?",
+        ]
+
+        for pattern in success_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                solution = match.group(1).strip() if match.groups() else ""
+                if len(solution) > 10:
+                    confirmed.append({
+                        'type': 'confirmed_solution',
+                        'solution': solution[:300],
+                        'tags': self.extract_tags(solution),
+                        'importance': 8  # High value - confirmed working
+                    })
+
+        return confirmed[:2]
 
     def extract_tags(self, text: str) -> List[str]:
         """Extract relevant tags from text based on keywords."""
@@ -189,11 +353,22 @@ class MemoryExtractor:
         return None
 
     def extract_all(self, text: str) -> List[Dict]:
-        """Extract all types of memories from text."""
+        """Extract all types of memories from text using semantic signals."""
         memories = []
+
+        # Signal-based extractions (highest priority)
+        memories.extend(self.extract_forgotten_items(text))      # "again" - must remember!
+        memories.extend(self.extract_confirmed_solutions(text))  # "that worked" - high value
+        memories.extend(self.extract_user_needs(text))           # "please" - user's goals
+
+        # Pattern-based extractions
         memories.extend(self.extract_solutions(text))
         memories.extend(self.extract_error_patterns(text))
         memories.extend(self.extract_antipatterns(text))
+
+        # Sort by importance (highest first)
+        memories.sort(key=lambda m: m.get('importance', 0), reverse=True)
+
         return memories
 
 
@@ -311,6 +486,36 @@ class AutoConcentrator:
                         reason=memory['reason'],
                         alternative=memory['alternative'],
                         tags=memory.get('tags', [])
+                    )
+                    stored.append(memory)
+
+                elif memory['type'] == 'user_need':
+                    # Store user needs as solutions (what they're trying to accomplish)
+                    self.bm.add_solution(
+                        problem=f"User need: {memory['need']}",
+                        solution="(Captured from conversation - pending resolution)",
+                        tags=memory.get('tags', []) + ['user-need'],
+                        code_snippet=None
+                    )
+                    stored.append(memory)
+
+                elif memory['type'] == 'forgotten_item':
+                    # High priority - this was repeated, should be remembered!
+                    self.bm.add_solution(
+                        problem=f"Repeated issue: {memory['description']}",
+                        solution="(Auto-captured - user had to repeat this)",
+                        tags=memory.get('tags', []) + ['repeated', 'high-priority'],
+                        code_snippet=None
+                    )
+                    stored.append(memory)
+
+                elif memory['type'] == 'confirmed_solution':
+                    # Confirmed working - high value!
+                    self.bm.add_solution(
+                        problem="Confirmed working solution",
+                        solution=memory['solution'],
+                        tags=memory.get('tags', []) + ['confirmed', 'working'],
+                        code_snippet=None
                     )
                     stored.append(memory)
 
