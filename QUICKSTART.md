@@ -1,6 +1,6 @@
 # Quick Start: Claude Code Integration
 
-## 🚀 60-Second Setup
+## 60-Second Setup
 
 ```bash
 # 1. Navigate to the memory system
@@ -13,7 +13,7 @@ python3 claude_memory.py stats
 python3 claude_memory.py add-pref coding_style "Your preference here" -t python
 ```
 
-## 💡 Three Ways to Use With Claude Code
+## Three Ways to Use With Claude Code
 
 ### Method 1: Copy-Paste (Easiest)
 
@@ -76,7 +76,7 @@ echo "Paste this content at the start of your Claude Code session"
 cat /tmp/claude-context.txt
 ```
 
-## 📝 Daily Workflow
+## Daily Workflow
 
 ### Morning (Starting Work)
 
@@ -110,7 +110,7 @@ python3 claude_memory.py save-session \
   -p ~/project
 ```
 
-## 🎯 Best Practices
+## Best Practices
 
 ### 1. Start Every Session With Context
 
@@ -177,13 +177,13 @@ python3 claude_memory.py search "your problem"
 # If not, ask Claude Code and then save the solution
 ```
 
-## 📋 Example Session
+##  Example Session
 
 ```bash
 # 1. Morning: Start new feature
 $ python3 integration.py "implement password reset flow" ~/my-app
 
-🧠 Loading relevant memory...
+Loading relevant memory...
 ✓ Context loaded
 
 # [Copy output, paste into Claude Code]
@@ -195,14 +195,14 @@ $ python3 claude_memory.py add-solution \
   -t python,security,auth \
   -c "token = secrets.token_urlsafe(32)"
 
-💡 Insight saved: a3f8c2e1b4d7
+Insight saved: a3f8c2e1b4d7
 
 # 3. During: Update project
 $ python3 claude_memory.py add-project ~/my-app \
   -n "My App" \
   -d "Added password reset functionality"
 
-📋 Project context updated
+Project context updated
 
 # 4. End of day: Save session
 $ python3 claude_memory.py save-session \
@@ -210,10 +210,10 @@ $ python3 claude_memory.py save-session \
   -l "Use Redis for token storage with TTL|SendGrid has rate limits - add retry logic|Always invalidate token after use" \
   -p ~/my-app
 
-📝 Session saved
+Session saved
 ```
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 **"No context found"**
 - You need to add preferences and solutions first
@@ -243,7 +243,7 @@ rm -rf ~/.claude-code-memory
 - View stored data: `ls ~/.claude-code-memory/`
 - All commands: `python3 claude_memory.py --help`
 
-## 💪 Pro Tips
+## Pro Tips
 
 1. **Alias Everything**: Add shell aliases for common operations
 2. **Tag Consistently**: Develop your own tagging taxonomy
@@ -259,4 +259,4 @@ rm -rf ~/.claude-code-memory
 2. Add your first real preference
 3. Use it with Claude Code on your next task
 4. Save what you learn
-5. Watch your productivity improve! 🚀
+5. Watch your productivity improve!

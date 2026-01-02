@@ -1,0 +1,6 @@
+# Memberberries local storage
+# This directory may contain sensitive information such as:
+# - API keys mentioned in error resolutions
+# - Credentials in environment configurations
+# - Proprietary code patterns and solutions
+.memberberries/

@@ -10,6 +10,7 @@ Member when you had to start from scratch every time? Not anymore!
 
 import sys
 import os
+import argparse
 from pathlib import Path
 
 # Add to path
@@ -20,31 +21,49 @@ from berry_manager import BerryManager
 
 class Juicer:
     """Juices memberberries for Claude Code."""
-    
-    def __init__(self):
-        self.bm = BerryManager()
-    
-    def juice_for_session(self, task_description: str, project_path: str = None) -> str:
+
+    def __init__(self, storage_mode: str = 'auto', base_path: str = None):
+        self.bm = BerryManager(base_path=base_path, storage_mode=storage_mode)
+
+    def juice_for_session(self, task_description: str, project_path: str = None,
+                          include_preferences: bool = True,
+                          include_solutions: bool = True,
+                          include_project: bool = True,
+                          include_errors: bool = True,
+                          include_antipatterns: bool = True,
+                          include_git_conventions: bool = True,
+                          include_testing: bool = True,
+                          include_api_notes: bool = True) -> str:
         """Juice memberberries at the start of a Claude Code session.
-        
+
         Args:
             task_description: What the user wants to accomplish
             project_path: Path to the project (default: current directory)
-            
+            include_*: Flags to include/exclude specific memory types
+
         Returns:
             Relevant juiced berries to inject into the conversation
         """
         if project_path is None:
             project_path = os.getcwd()
-        
+
         print(f"\n🫐 Juicing memberberries for: '{task_description}'")
-        print(f"📁 Project: {project_path}\n")
-        
+        print(f"📁 Project: {project_path}")
+        print(f"📦 Storage: {self.bm.base_path}\n")
+
         context = self.bm.get_relevant_context(
             query=task_description,
-            project_path=project_path
+            project_path=project_path,
+            include_preferences=include_preferences,
+            include_solutions=include_solutions,
+            include_project=include_project,
+            include_errors=include_errors,
+            include_antipatterns=include_antipatterns,
+            include_git_conventions=include_git_conventions,
+            include_testing=include_testing,
+            include_api_notes=include_api_notes
         )
-        
+
         if context and context != "No relevant context found.":
             print("✓ Berries juiced successfully\n")
             return f"""
@@ -143,27 +162,77 @@ End of memberberries. Member these when helping with the task!
 
 
 # Convenience function for command-line usage
-def juice_context_for_task(task: str, project_path: str = None) -> str:
+def juice_context_for_task(task: str, project_path: str = None,
+                           storage_mode: str = 'auto', **kwargs) -> str:
     """Quick function to juice berries - can be called from shell scripts.
-    
+
     Usage:
         python juice.py "implement user authentication" /path/to/project
     """
-    juicer = Juicer()
-    return juicer.juice_for_session(task, project_path)
+    juicer = Juicer(storage_mode=storage_mode)
+    return juicer.juice_for_session(task, project_path, **kwargs)
 
 
 if __name__ == "__main__":
-    # Allow calling from command line
-    if len(sys.argv) < 2:
-        print("🫐 Memberberries Juice")
-        print("\nUsage: python juice.py <task_description> [project_path]")
-        print("\nExample:")
-        print("  python juice.py 'implement user authentication' ~/my-project")
-        sys.exit(1)
-    
-    task = sys.argv[1]
-    project = sys.argv[2] if len(sys.argv) > 2 else None
-    
-    context = juice_context_for_task(task, project)
+    parser = argparse.ArgumentParser(
+        description='🫐 Memberberries Juice - Claude Code Integration Helper',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python juice.py "implement user authentication"
+  python juice.py "fix API rate limiting" ~/my-project
+  python juice.py "add tests" --no-preferences --no-api-notes
+  python juice.py "deploy to production" --local
+        """
+    )
+
+    parser.add_argument('task', help='Task description to juice berries for')
+    parser.add_argument('project', nargs='?', help='Project path (default: current dir)')
+
+    # Storage mode
+    parser.add_argument('--global', dest='global_storage', action='store_true',
+                        help='Use global storage (~/.memberberries)')
+    parser.add_argument('--local', dest='local_storage', action='store_true',
+                        help='Use per-project storage (.memberberries/)')
+
+    # Exclusion flags
+    parser.add_argument('--no-preferences', action='store_true',
+                        help='Exclude preferences')
+    parser.add_argument('--no-solutions', action='store_true',
+                        help='Exclude solutions')
+    parser.add_argument('--no-project', action='store_true',
+                        help='Exclude project context')
+    parser.add_argument('--no-errors', action='store_true',
+                        help='Exclude error patterns')
+    parser.add_argument('--no-antipatterns', action='store_true',
+                        help='Exclude antipatterns')
+    parser.add_argument('--no-git-conventions', action='store_true',
+                        help='Exclude git conventions')
+    parser.add_argument('--no-testing', action='store_true',
+                        help='Exclude testing patterns')
+    parser.add_argument('--no-api-notes', action='store_true',
+                        help='Exclude API notes')
+
+    args = parser.parse_args()
+
+    # Determine storage mode
+    storage_mode = 'auto'
+    if args.global_storage:
+        storage_mode = 'global'
+    elif args.local_storage:
+        storage_mode = 'local'
+
+    juicer = Juicer(storage_mode=storage_mode)
+    context = juicer.juice_for_session(
+        task_description=args.task,
+        project_path=args.project,
+        include_preferences=not args.no_preferences,
+        include_solutions=not args.no_solutions,
+        include_project=not args.no_project,
+        include_errors=not args.no_errors,
+        include_antipatterns=not args.no_antipatterns,
+        include_git_conventions=not args.no_git_conventions,
+        include_testing=not args.no_testing,
+        include_api_notes=not args.no_api_notes
+    )
     print(context)

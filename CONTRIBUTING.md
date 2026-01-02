@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing! This project aims to make Claude Code more effective by providing persistent memory across sessions.
 
-## 🎯 Project Vision
+## Project Vision
 
 Create a simple, effective memory system that:
 - Works out of the box with zero configuration
@@ -10,7 +10,7 @@ Create a simple, effective memory system that:
 - Scales from personal use to power users
 - Remains easy to understand and modify
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Development Setup
 
@@ -53,7 +53,7 @@ claude-code-memory/
 └── README.md
 ```
 
-## 🛠️ How to Contribute
+## How to Contribute
 
 ### Reporting Bugs
 
@@ -139,7 +139,7 @@ Good feature requests include:
    - Any breaking changes?
    - Related issues (if any)
 
-## 📝 Coding Standards
+## Coding Standards
 
 ### Python Style
 
@@ -187,7 +187,7 @@ perf: Optimize search for large datasets
 - Include examples in documentation
 - Update CHANGELOG.md with your changes
 
-## 🧪 Testing
+## Testing
 
 We need test coverage! Priority areas:
 
@@ -220,7 +220,7 @@ Run tests:
 python -m pytest tests/ -v
 ```
 
-## 🎨 Design Principles
+## Design Principles
 
 ### 1. Simplicity First
 - Default configuration should "just work"
@@ -242,7 +242,7 @@ python -m pytest tests/ -v
 - Swappable storage backends
 - Easy to customize
 
-## 📋 Good First Issues
+## Good First Issues
 
 Look for issues tagged `good-first-issue`:
 - Documentation improvements
@@ -250,28 +250,28 @@ Look for issues tagged `good-first-issue`:
 - Simple bug fixes
 - Test coverage
 
-## 🤝 Community
+## Community
 
 - Be respectful and inclusive
 - Help others in issues/discussions
 - Share your use cases
 - Provide constructive feedback
 
-## 📜 License
+## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
 
-## 🙏 Recognition
+## Recognition
 
 Contributors will be:
 - Listed in CONTRIBUTORS.md
 - Mentioned in release notes
 - Credited in documentation (for significant contributions)
 
-## ❓ Questions?
+## Questions?
 
 - Open a Discussion on GitHub
 - Comment on relevant issues
 - Check existing documentation
 
-Thank you for contributing! 🚀
+Thank you for contributing!

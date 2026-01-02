@@ -4,7 +4,7 @@
   <img src="Memberberries.svg" alt="Memberberries Logo" width="200"/>
 </p>
 
-### *Member when Claude Code remembered everything?*
+### *Member when Claude Code didn't?*
 
 > Persistent memory system for Claude Code - because AI assistants deserve to remember too.
 
@@ -12,26 +12,35 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## 🎯 What is this?
+## What is this?
 
 Memberberries is a lightweight, file-based memory system that enables Claude Code to remember:
 - **Your preferences** - coding style, favorite tools, workflows
 - **Project context** - architecture decisions, tech stack, conventions
 - **Past solutions** - problems you've solved and how
 - **Session history** - what you accomplished each day
+- **Error patterns** - debugging insights and resolutions
+- **Antipatterns** - what NOT to do and why
+- **Git conventions** - commit style, branch naming, PR templates
+- **Dependencies** - library preferences, version constraints, gotchas
+- **Testing patterns** - test strategies, frameworks, mocking approaches
+- **Environment configs** - local, Docker, CI setup notes
+- **API notes** - rate limits, auth patterns, service quirks
 
 Instead of starting fresh every time, Claude Code picks up where you left off.
 
-## ✨ Key Features
+## Key Features
 
-- 🔍 **Semantic Search** - Find relevant memories by meaning, not just keywords
-- 📁 **Local-First** - All data stays on your machine, zero cloud dependencies
-- 🚀 **Zero Config** - Works out of the box, no setup required
-- 🔌 **Extensible** - Plugin architecture for embeddings and storage backends
-- 📝 **Human-Readable** - All data stored in JSON/markdown files
-- ⚡ **Lightweight** - Just Python + numpy, no heavy dependencies
+- **Semantic Search** - Find relevant memories by meaning, not just keywords
+- **Local-First** - All data stays on your machine, zero cloud dependencies
+- **Zero Config** - Works out of the box, no setup required
+- **Extensible** - Plugin architecture for embeddings and storage backends
+- **Human-Readable** - All data stored in JSON/markdown files
+- **Lightweight** - Just Python + numpy, no heavy dependencies
+- **Secure** - File permissions (0600), sensitive data warnings
+- **Flexible Storage** - Global (`~/.memberberries`) or per-project (`.memberberries/`)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -63,7 +72,7 @@ python juice.py "implement user authentication" ~/my-project
 # Claude now memberberries your preferences, project setup, and past solutions!
 ```
 
-## 📖 How It Works
+## How It Works
 
 ### Before Claude Code Session
 ```bash
@@ -94,7 +103,7 @@ Claude Code now memberberries:
 - Solutions to similar problems you've solved
 - Relevant code patterns and conventions
 
-## 📊 Results
+## Results
 
 | Without Memberberries | With Memberberries |
 |----------------------|-------------------|
@@ -103,7 +112,7 @@ Claude Code now memberberries:
 | No awareness of past work | Memberberries previous solutions |
 | Starts from scratch | Continues seamlessly |
 
-## 📚 Documentation
+## Documentation
 
 - [**Quick Start Guide**](QUICKSTART.md) - Get up and running in 60 seconds
 - [**Architecture Overview**](ARCHITECTURE.md) - System design and internals
@@ -124,10 +133,44 @@ python memberberries.py concentrate-solution \
   "Store in Redis with 7-day expiry" \
   -t auth,jwt,security
 
+# Concentrate an error pattern you solved
+python memberberries.py concentrate-error \
+  "ModuleNotFoundError: No module named 'numpy'" \
+  "Install via conda on M1 Mac, not pip" \
+  -t python,macos,m1
+
+# Concentrate an antipattern to avoid
+python memberberries.py concentrate-antipattern \
+  "Using moment.js for date formatting" \
+  "Causes massive bundle bloat (300KB+)" \
+  "Use date-fns or native Intl.DateTimeFormat" \
+  -t javascript,performance
+
+# Concentrate git conventions
+python memberberries.py concentrate-git-convention \
+  commit_message \
+  "type(scope): description" \
+  "feat(auth): add JWT refresh token support" \
+  -t conventional-commits
+
 # Evening: Concentrate session summary
 python memberberries.py concentrate-session \
   "Implemented JWT auth with refresh tokens" \
   -l "Use Redis for token storage|Always validate expiry|Rotate tokens on use"
+```
+
+### Per-Project Storage
+
+```bash
+# Initialize per-project storage (adds to .gitignore too)
+python memberberries.py init-gitignore ~/my-project
+
+# Use local storage for this project
+python memberberries.py --local concentrate-dependency \
+  fastapi -v ">=0.100.0" -n "Required for lifespan support"
+
+# Force global storage
+python juice.py --global "implement auth" ~/my-project
 ```
 
 ### Searching Your Memberberries
@@ -141,7 +184,7 @@ python memberberries.py search "database connection pooling"
    Solution: Use lifespan context manager with connection pooling...
 ```
 
-## 🛠️ Advanced Features
+## Advanced Features
 
 ### Upgrade to Better Embeddings
 
@@ -164,7 +207,7 @@ python migrate_to_chromadb.py
 
 See [Vector DB Upgrade Guide](VECTOR_DB_UPGRADE.md) for details.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - How to report bugs
@@ -174,15 +217,19 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 **Good first issues:** Look for issues tagged `good-first-issue`
 
-## 🗺️ Roadmap
+## Roadmap
 
-### v1.0 (Current)
+### v1.0
 - ✅ File-based berry storage
 - ✅ Semantic juicing
 - ✅ CLI interface
 - ✅ Claude Code integration
 
-### v1.1 (Next)
+### v1.1 (Current)
+- ✅ Extended memory types (errors, antipatterns, git, deps, testing, env, API)
+- ✅ Per-project storage support
+- ✅ Security features (file permissions, sensitive data warnings)
+- ✅ Gitignore integration
 - [ ] Vector database support (optional)
 - [ ] Better embedding models for juicing
 - [ ] Test coverage
@@ -192,10 +239,11 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - [ ] Web UI for browsing memberberries
 - [ ] Auto-concentration from transcripts
 - [ ] Team sharing (encrypted berries)
-- [ ] Git integration
+- [ ] Git hooks integration
 - [ ] Claude Code plugin/extension
+- [ ] Claude Code compatibility monitoring
 
-## 📈 Performance
+## Performance
 
 | Metric | File Storage | ChromaDB (Optional) |
 |--------|-------------|---------------------|
@@ -204,7 +252,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 | Search (10,000 items) | ~1s | ~15ms |
 | Storage (1,000 items) | ~3MB | ~5MB |
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Inspired by the need for continuity in coding sessions with Claude Code. Built to be:
 - Simple enough for anyone to use
@@ -214,11 +262,11 @@ Inspired by the need for continuity in coding sessions with Claude Code. Built t
 
 *Member when AI had no memory?* 🫐
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) for details
 
-## 🔗 Links
+## Links
 
 - [Report a Bug](https://github.com/wylloh/memberberries/issues)
 - [Request a Feature](https://github.com/wylloh/memberberries/issues)
@@ -226,6 +274,6 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ---
 
-**Made with ❤️ for the Claude Code community**
+**Made with lurve for the Claude Code community**
 
-⭐ Star this repo if it helps you memberberry better!
+Star this repo if it helps you member better 🫐
