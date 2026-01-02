@@ -42,33 +42,54 @@ Instead of starting fresh every time, Claude Code picks up where you left off.
 
 ## Quick Start
 
-### Installation
+### New Users (Don't have Claude Code yet)
 
 ```bash
-# Clone the repository
+# Clone memberberries
 git clone https://github.com/wylloh/memberberries.git
 cd memberberries
 
-# Run the setup script
-bash setup.sh
-
-# Install the 'member' command for seamless integration
-bash install_member.sh
+# Run the setup wizard - it will guide you through everything
+python3 member.py setup
 ```
 
-### Seamless Workflow (Recommended)
+The setup wizard will:
+1. Check if Claude Code is installed (and help you install it if not)
+2. Run an interactive project setup to create your CLAUDE.md
+3. Configure hooks so context syncs on every prompt
+4. Install the `member` command globally
+
+### Existing Claude Code Users
 
 ```bash
-# Instead of just 'claude', use 'member':
-member "implement user authentication"
+# Clone memberberries
+git clone https://github.com/wylloh/memberberries.git
+cd memberberries
 
-# That's it! Memberberries automatically:
-# 1. Syncs relevant memories into CLAUDE.md
-# 2. Launches Claude Code
-# 3. Claude reads your personalized context automatically
+# Install dependencies
+pip install -r requirements.txt
+
+# Run setup in your project directory
+cd ~/your-project
+python3 /path/to/memberberries/member.py setup
 ```
 
-The `member` command is a drop-in enhancement for `claude`. Your existing CLAUDE.md content is preserved - memberberries manages its own section.
+### Seamless Workflow
+
+```bash
+# Start a session - just like 'claude' but with memory
+member "implement user authentication"
+
+# That's it! Memberberries:
+# 1. Syncs relevant memories into CLAUDE.md
+# 2. Launches Claude Code
+# 3. Hooks keep context fresh on EVERY prompt throughout the session
+```
+
+The `member` command is a drop-in enhancement for `claude`:
+- Your existing CLAUDE.md content is preserved
+- Memberberries manages its own section (below a delimiter)
+- Context automatically updates based on what you're working on
 
 ### Building Your Memory
 
@@ -97,11 +118,53 @@ python memberberries.py concentrate-error \
 │  $ member "implement auth"                                  │
 │     ↓                                                       │
 │  1. Syncs relevant memories → CLAUDE.md                     │
-│  2. Launches: claude                                        │
+│  2. Launches Claude Code                                    │
 │     ↓                                                       │
-│  Claude Code reads CLAUDE.md automatically                  │
-│  (Your context is already there!)                           │
+│  You're now in Claude Code with your context loaded!        │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Every prompt you type:                              │   │
+│  │    → Hook triggers memberberries sync               │   │
+│  │    → CLAUDE.md updates with relevant context        │   │
+│  │    → Claude processes your prompt with fresh memory │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Context stays relevant throughout your entire session!     │
 └─────────────────────────────────────────────────────────────┘
+```
+
+### Interactive Project Setup
+
+When you run `member init` or `member setup`, the wizard helps you create CLAUDE.md:
+
+```
+$ member init
+
+============================================================
+  MEMBERBERRIES PROJECT SETUP WIZARD
+============================================================
+
+Setting up: my-awesome-project
+
+Describe your project in 1-2 sentences:
+  (Enter to skip, ? for suggestions): ?
+  Suggested: A microservices project using Python, FastAPI, Docker
+  Use this? [Y/n]:
+
+What's your project architecture?
+  [1] Monolith
+  [2] Microservices
+  [3] Serverless
+  ...
+  [?] Suggest based on codebase
+
+Detected tech stack: Python, FastAPI, pytest, Docker
+Add or modify? [Enter to confirm]:
+
+Coding conventions (one per line, empty line to finish):
+  > Use type hints everywhere
+  > Prefer async functions for I/O
+  >
 ```
 
 ### What Gets Synced
@@ -261,6 +324,10 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - ✅ Per-project storage support
 - ✅ Security features (file permissions, sensitive data warnings)
 - ✅ Gitignore integration
+- ✅ Seamless `member` command with hook-based sync
+- ✅ Interactive project setup wizard
+- ✅ Auto-detection of tech stack and architecture
+- ✅ Claude Code installation guidance
 - [ ] Vector database support (optional)
 - [ ] Better embedding models for juicing
 - [ ] Test coverage
@@ -270,7 +337,6 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - [ ] Web UI for browsing memberberries
 - [ ] Auto-concentration from transcripts
 - [ ] Team sharing (encrypted berries)
-- [ ] Git hooks integration
 - [ ] Claude Code plugin/extension
 - [ ] Claude Code compatibility monitoring
 
