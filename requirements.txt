@@ -1,0 +1,5 @@
+numpy>=1.24.0
+
+# Optional upgrades for better embeddings:
+# sentence-transformers>=2.2.0  # For local semantic search
+# openai>=1.0.0  # For OpenAI embeddings API
