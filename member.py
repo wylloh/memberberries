@@ -407,92 +407,146 @@ class ClaudeMDManager:
 
         return user_content, mb_content
 
-    def generate_memberberries_section(self, query: str = None, max_tokens: int = 2000) -> str:
-        """Generate the memberberries section for CLAUDE.md.
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimate (1 token ≈ 4 characters)."""
+        return len(text) // 4
+
+    def _format_memory_item(self, memory_type: str, item: dict) -> str:
+        """Format a single memory item for display."""
+        if memory_type == 'preference':
+            return f"- **{item['category']}**: {item['content']}"
+        elif memory_type == 'solution':
+            return f"- **{item['problem']}**: {item['solution']}"
+        elif memory_type == 'error':
+            msg = item['error_message'][:100] + "..." if len(item['error_message']) > 100 else item['error_message']
+            return f"- **{msg}**: {item['resolution']}"
+        elif memory_type == 'antipattern':
+            return f"- **Don't**: {item['pattern']}\n  - *Why*: {item['reason']}\n  - *Instead*: {item['alternative']}"
+        elif memory_type == 'git_convention':
+            return f"- **{item['convention_type']}**: {item['pattern']}\n  - *Example*: `{item['example']}`"
+        elif memory_type == 'testing':
+            return f"- **{item['strategy']} ({item['framework']})**: {item['pattern']}"
+        elif memory_type == 'api_note':
+            return f"- **{item['service_name']}**: {item['notes']}"
+        return ""
+
+    def generate_memberberries_section(self, query: str = None, max_tokens: int = 1500) -> str:
+        """Generate the memberberries section for CLAUDE.md with token budget.
 
         Args:
             query: Query to focus context (task description or prompt)
-            max_tokens: Approximate max tokens for the section (rough estimate)
+            max_tokens: Maximum tokens for the section (keeps CLAUDE.md lean)
 
         Returns:
             Formatted memberberries section content
         """
-        sections = []
-
         # Get query for search, or use generic
         search_query = query or "general development context"
 
-        # Header with timestamp
-        sections.append(f"\n*Context synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
+        # Header with timestamp (always included)
+        header_lines = [f"\n*Context synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}*"]
         if query:
-            # Truncate long queries for display
-            display_query = query[:100] + "..." if len(query) > 100 else query
-            sections.append(f"*Query: {display_query}*\n")
+            display_query = query[:80] + "..." if len(query) > 80 else query
+            header_lines.append(f"*Query: {display_query}*")
 
-        # Get preferences
+        header = "\n".join(header_lines)
+        current_tokens = self._estimate_tokens(header)
+
+        # Collect all memories with priority scores
+        # Priority: Higher = more important = added first
+        memory_groups = []
+
+        # Priority 1: High-priority tagged items (repeated, confirmed)
+        solutions = self.bm.search_solutions(search_query, top_k=5)
+        high_priority = [s for s in solutions if any(t in s.get('tags', []) for t in ['repeated', 'confirmed', 'high-priority'])]
+        if high_priority:
+            memory_groups.append(('High Priority', 'solution', high_priority, 100))
+
+        # Priority 2: Preferences (always relevant)
         prefs = self.bm.get_preferences(search_query, top_k=3)
         if prefs:
-            sections.append("\n## Your Preferences")
-            for pref in prefs:
-                sections.append(f"- **{pref['category']}**: {pref['content']}")
+            memory_groups.append(('Your Preferences', 'preference', prefs, 90))
 
-        # Get relevant solutions
-        solutions = self.bm.search_solutions(search_query, top_k=2)
-        if solutions:
-            sections.append("\n## Relevant Solutions")
-            for sol in solutions:
-                sections.append(f"- **{sol['problem']}**: {sol['solution']}")
+        # Priority 3: Regular solutions
+        regular_solutions = [s for s in solutions if s not in high_priority][:3]
+        if regular_solutions:
+            memory_groups.append(('Relevant Solutions', 'solution', regular_solutions, 80))
 
-        # Get error patterns
+        # Priority 4: Error patterns
         errors = self.bm.search_errors(search_query, top_k=2)
         if errors:
-            sections.append("\n## Known Error Patterns")
-            for err in errors:
-                msg = err['error_message'][:100] + "..." if len(err['error_message']) > 100 else err['error_message']
-                sections.append(f"- **{msg}**: {err['resolution']}")
+            memory_groups.append(('Known Error Patterns', 'error', errors, 70))
 
-        # Get antipatterns
+        # Priority 5: Antipatterns
         antipatterns = self.bm.search_antipatterns(search_query, top_k=2)
         if antipatterns:
-            sections.append("\n## Antipatterns (Avoid These)")
-            for ap in antipatterns:
-                sections.append(f"- **Don't**: {ap['pattern']}")
-                sections.append(f"  - *Why*: {ap['reason']}")
-                sections.append(f"  - *Instead*: {ap['alternative']}")
+            memory_groups.append(('Antipatterns (Avoid)', 'antipattern', antipatterns, 60))
 
-        # Get git conventions
+        # Priority 6: Git conventions
         git_convs = self.bm.search_git_conventions(search_query, top_k=2)
         if git_convs:
-            sections.append("\n## Git Conventions")
-            for conv in git_convs:
-                sections.append(f"- **{conv['convention_type']}**: {conv['pattern']}")
-                sections.append(f"  - *Example*: `{conv['example']}`")
+            memory_groups.append(('Git Conventions', 'git_convention', git_convs, 50))
 
-        # Get testing patterns
+        # Priority 7: Testing patterns
         testing = self.bm.search_testing_patterns(search_query, top_k=2)
         if testing:
-            sections.append("\n## Testing Patterns")
-            for tp in testing:
-                sections.append(f"- **{tp['strategy']} ({tp['framework']})**: {tp['pattern']}")
+            memory_groups.append(('Testing Patterns', 'testing', testing, 40))
 
-        # Get API notes
+        # Priority 8: API notes
         api_notes = self.bm.search_api_notes(search_query, top_k=2)
         if api_notes:
-            sections.append("\n## API Notes")
-            for note in api_notes:
-                sections.append(f"- **{note['service_name']}**: {note['notes']}")
+            memory_groups.append(('API Notes', 'api_note', api_notes, 30))
 
-        # Get project context if available
+        # Sort by priority (highest first)
+        memory_groups.sort(key=lambda x: x[3], reverse=True)
+
+        # Build sections within token budget
+        sections = [header]
+        items_added = 0
+
+        for group_name, memory_type, items, priority in memory_groups:
+            if current_tokens >= max_tokens:
+                break
+
+            group_header = f"\n## {group_name}"
+            group_tokens = self._estimate_tokens(group_header)
+
+            # Check if we can fit at least the header + one item
+            if current_tokens + group_tokens > max_tokens:
+                break
+
+            group_lines = [group_header]
+            group_tokens = self._estimate_tokens(group_header)
+
+            for item in items:
+                formatted = self._format_memory_item(memory_type, item)
+                item_tokens = self._estimate_tokens(formatted)
+
+                if current_tokens + group_tokens + item_tokens > max_tokens:
+                    break
+
+                group_lines.append(formatted)
+                group_tokens += item_tokens
+                items_added += 1
+
+            if len(group_lines) > 1:  # Has items beyond header
+                sections.append("\n".join(group_lines))
+                current_tokens += group_tokens
+
+        # Add project context if we have room
         project_ctx = self.bm.get_project_context(str(self.project_path))
-        if project_ctx:
-            sections.append("\n## Project Context (from Memberberries)")
+        if project_ctx and current_tokens < max_tokens - 100:
+            ctx_lines = ["\n## Project Context"]
             if project_ctx.get('description'):
-                sections.append(f"- **Description**: {project_ctx['description']}")
+                ctx_lines.append(f"- **Description**: {project_ctx['description'][:100]}")
             if project_ctx.get('tech_stack'):
-                sections.append(f"- **Tech Stack**: {', '.join(project_ctx['tech_stack'])}")
+                ctx_lines.append(f"- **Tech Stack**: {', '.join(project_ctx['tech_stack'][:5])}")
+            ctx_text = "\n".join(ctx_lines)
+            if current_tokens + self._estimate_tokens(ctx_text) <= max_tokens:
+                sections.append(ctx_text)
 
         # If no content was generated, show a friendly message
-        if len(sections) <= 2:  # Only header lines
+        if items_added == 0:
             sections.append("\n*Building your memory...*")
             sections.append("*Insights will be captured automatically as you work.*")
 
