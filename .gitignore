@@ -47,3 +47,6 @@ sessions/
 # Embeddings cache
 *.npy
 embeddings_cache/
+
+# Claude Code hooks (user-specific)
+.claude/
