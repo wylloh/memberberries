@@ -1472,6 +1472,7 @@ Task Clusters (Gravitational Memory Organization):
 
 Git Workflow:
   member --install-hook           Install git pre-commit hook (auto-cleans CLAUDE.md)
+  member --regenerate-hooks       Regenerate Claude Code hooks with correct paths
   member --clean                  Manually clean memberberries section before commit
 
 Mid-Session Context:
@@ -1514,6 +1515,8 @@ Active Task:
                         help='Use per-project memberberries storage')
     parser.add_argument('--install-hook', action='store_true',
                         help='Install git pre-commit hook to auto-clean CLAUDE.md')
+    parser.add_argument('--regenerate-hooks', action='store_true',
+                        help='Regenerate Claude Code hooks with correct paths')
 
     args = parser.parse_args()
 
@@ -1560,6 +1563,20 @@ fi
         os.chmod(pre_commit, 0o755)
         print("✅ Git pre-commit hook installed!")
         print("   CLAUDE.md will be auto-cleaned before each commit.")
+        return
+
+    # Handle --regenerate-hooks
+    if args.regenerate_hooks:
+        project_path = Path(args.project) if args.project else Path.cwd()
+        if not ClaudeCodeInstaller.is_installed():
+            print("Error: Claude Code is not installed.")
+            return
+
+        print(f"Regenerating Claude Code hooks for {project_path}...")
+        print(f"  Using memberberries from: {MEMBERBERRIES_DIR}")
+        ClaudeCodeInstaller.setup_hooks(project_path)
+        print("✅ Hooks regenerated successfully!")
+        print("   Hook scripts now use the correct paths.")
         return
 
     # Handle subcommands
