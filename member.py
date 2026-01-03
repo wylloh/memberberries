@@ -43,7 +43,7 @@ MB_START = "<!-- MEMBERBERRIES CONTEXT - Auto-managed, do not edit below this li
 MB_END = "<!-- END MEMBERBERRIES -->"
 
 # Path to memberberries installation
-MEMBERBERRIES_DIR = Path(__file__).parent.resolve()
+MEMBERBERRIES_DIR = Path(__file__).resolve().parent  # resolve() first to follow symlinks
 
 
 class ConfigManager:
