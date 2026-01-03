@@ -24,7 +24,35 @@ class MemoryExtractor:
     """Extracts memories from conversation text.
 
     Includes adaptive learning to detect user-specific communication patterns.
+    Now with enhanced extraction from Claude's own responses.
     """
+
+    # === CLAUDE RESPONSE PATTERNS ===
+    # These patterns capture decisions and reasoning from Claude's responses
+
+    DECISION_PATTERNS = [
+        r"I (?:decided|chose|opted|went with|selected|picked)\s+(?:to\s+)?([^.!?\n]+)",
+        r"(?:The |My )?(?:decision|choice|approach|solution|strategy)(?:\s+(?:is|was))?\s*[:\-]?\s*([^.!?\n]+)",
+        r"I'm (?:using|implementing|going with)\s+([^.!?\n]+)",
+        r"(?:I'll|Let me|Going to)\s+use\s+([^.!?\n]+?)(?:\s+(?:because|since|for))",
+    ]
+
+    REASONING_PATTERNS = [
+        r"(?:because|since|the reason is|this is because)\s+([^.!?\n]+)",
+        r"(?:This|It)(?:'s| is) (?:better|cleaner|simpler|faster|more efficient)\s+(?:because\s+)?([^.!?\n]+)",
+        r"(?:The benefit|advantage|upside)(?:\s+(?:is|of this))?\s*[:\-]?\s*([^.!?\n]+)",
+    ]
+
+    IMPLEMENTATION_PATTERNS = [
+        r"(?:The implementation|Here's how|The approach)[:\-]?\s*([^.!?\n]+)",
+        r"```(\w+)\n([\s\S]+?)```",  # Code blocks with language
+        r"(?:Key (?:changes|points|decisions))[:\-]?\s*\n((?:\s*[-*]\s*[^\n]+\n?)+)",  # Bullet lists
+    ]
+
+    SUMMARY_PATTERNS = [
+        r"## (?:Summary|Changes|Implementation|Decision)[^\n]*\n([\s\S]+?)(?=\n##|\n---|\Z)",
+        r"(?:In summary|To summarize|TL;DR)[,:\-]?\s*([^.!?\n]+(?:[.!?\n][^.!?\n]+)*)",
+    ]
 
     # === SEMANTIC SIGNALS ===
     # These indicate important moments worth capturing
@@ -454,6 +482,86 @@ class MemoryExtractor:
 
         return forgotten[:2]
 
+    def extract_claude_decisions(self, text: str) -> List[Dict]:
+        """Extract decisions and reasoning from Claude's responses.
+
+        This is key for capturing Claude's own thought process and choices.
+        """
+        decisions = []
+
+        for pattern in self.DECISION_PATTERNS:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                decision = match.group(1).strip()
+                if len(decision) > 15 and not self._is_garbage_content(decision):
+                    # Look for reasoning nearby
+                    context_end = min(match.end() + 300, len(text))
+                    context = text[match.end():context_end]
+                    reasoning = self._extract_reasoning(context)
+
+                    decisions.append({
+                        'type': 'decision',
+                        'decision': self._smart_truncate(decision, max_len=400),
+                        'reasoning': self._smart_truncate(reasoning, max_len=300) if reasoning else None,
+                        'tags': self.extract_tags(decision),
+                        'importance': 7  # Decisions are high value
+                    })
+
+        return decisions[:3]
+
+    def _extract_reasoning(self, context: str) -> Optional[str]:
+        """Extract reasoning from context following a decision."""
+        for pattern in self.REASONING_PATTERNS:
+            match = re.search(pattern, context, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def extract_claude_summaries(self, text: str) -> List[Dict]:
+        """Extract summaries and key points from Claude's responses."""
+        summaries = []
+
+        for pattern in self.SUMMARY_PATTERNS:
+            matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                summary = match.group(1).strip()
+                if len(summary) > 20 and not self._is_garbage_content(summary):
+                    summaries.append({
+                        'type': 'summary',
+                        'content': self._smart_truncate(summary, max_len=600),
+                        'tags': self.extract_tags(summary),
+                        'importance': 6
+                    })
+
+        return summaries[:2]
+
+    def extract_code_decisions(self, text: str) -> List[Dict]:
+        """Extract code snippets with their context/purpose."""
+        code_decisions = []
+
+        # Look for code blocks with preceding context
+        code_pattern = r"([^\n]+)\n```(\w+)\n([\s\S]+?)```"
+        matches = re.finditer(code_pattern, text)
+
+        for match in matches:
+            context = match.group(1).strip()
+            language = match.group(2)
+            code = match.group(3).strip()
+
+            # Only capture if there's meaningful context
+            if len(context) > 10 and len(code) > 20:
+                if not self._is_garbage_content(context + code):
+                    code_decisions.append({
+                        'type': 'code_decision',
+                        'context': self._smart_truncate(context, max_len=200),
+                        'language': language,
+                        'code': self._smart_truncate(code, max_len=500),
+                        'tags': self.extract_tags(context) + [language],
+                        'importance': 6
+                    })
+
+        return code_decisions[:3]
+
     def extract_confirmed_solutions(self, text: str) -> List[Dict]:
         """Extract solutions that were confirmed to work."""
         confirmed = []
@@ -607,11 +715,22 @@ class MemoryExtractor:
             return alt_match.group(1).strip()
         return None
 
-    def extract_all(self, text: str) -> List[Dict]:
-        """Extract all types of memories from text using semantic signals."""
+    def extract_all(self, text: str, is_assistant: bool = False) -> List[Dict]:
+        """Extract all types of memories from text using semantic signals.
+
+        Args:
+            text: The text to extract from
+            is_assistant: If True, prioritize Claude-response-specific patterns
+        """
         memories = []
 
-        # Signal-based extractions (highest priority)
+        # === CLAUDE RESPONSE EXTRACTION (highest priority) ===
+        if is_assistant:
+            memories.extend(self.extract_claude_decisions(text))
+            memories.extend(self.extract_claude_summaries(text))
+            memories.extend(self.extract_code_decisions(text))
+
+        # Signal-based extractions (high priority)
         memories.extend(self.extract_forgotten_items(text))      # "again" - must remember!
         memories.extend(self.extract_confirmed_solutions(text))  # "that worked" - high value
         memories.extend(self.extract_user_needs(text))           # "please" - user's goals
@@ -668,21 +787,30 @@ class AutoConcentrator:
         # Get the last N messages
         recent_messages = messages[-last_n_messages:] if len(messages) > last_n_messages else messages
 
-        # Extract text content from messages
-        conversation_text = self._extract_text_from_messages(recent_messages)
+        # Extract text content from messages, separated by role
+        user_text, assistant_text = self._extract_text_from_messages(recent_messages)
 
         # Learn from the user's communication patterns
-        self.extractor.learn_from_text(conversation_text)
+        if user_text:
+            self.extractor.learn_from_text(user_text)
 
-        # Extract memories
-        extracted = self.extractor.extract_all(conversation_text)
+        # Extract memories from both sources
+        extracted = []
+
+        # Extract from user messages (standard patterns)
+        if user_text:
+            extracted.extend(self.extractor.extract_all(user_text, is_assistant=False))
+
+        # Extract from assistant messages (Claude-specific patterns)
+        if assistant_text:
+            extracted.extend(self.extractor.extract_all(assistant_text, is_assistant=True))
 
         # Store extracted memories
         stored = self._store_memories(extracted)
 
         # Record effective signals when memories are successfully extracted
-        if stored:
-            emphasized = self.extractor.detect_emphasis_patterns(conversation_text)
+        if stored and user_text:
+            emphasized = self.extractor.detect_emphasis_patterns(user_text)
             for word in emphasized[:5]:
                 self.bm.record_effective_signal(word)
 
@@ -714,30 +842,43 @@ class AutoConcentrator:
 
         return stored
 
-    def _extract_text_from_messages(self, messages: List[Dict]) -> str:
-        """Extract text content from message objects."""
-        texts = []
+    def _extract_text_from_messages(self, messages: List[Dict]) -> Tuple[str, str]:
+        """Extract text content from message objects, separating user and assistant.
+
+        Returns:
+            Tuple of (user_text, assistant_text)
+        """
+        user_texts = []
+        assistant_texts = []
 
         for msg in messages:
-            # Handle different message formats
             if isinstance(msg, dict):
+                role = msg.get('role', 'user')
+                content_text = ""
+
                 # Try common message structures
                 if 'content' in msg:
                     content = msg['content']
                     if isinstance(content, str):
-                        texts.append(content)
+                        content_text = content
                     elif isinstance(content, list):
                         for item in content:
                             if isinstance(item, dict) and 'text' in item:
-                                texts.append(item['text'])
+                                content_text += item['text'] + "\n"
                             elif isinstance(item, str):
-                                texts.append(item)
+                                content_text += item + "\n"
                 elif 'text' in msg:
-                    texts.append(msg['text'])
+                    content_text = msg['text']
                 elif 'message' in msg:
-                    texts.append(str(msg['message']))
+                    content_text = str(msg['message'])
 
-        return "\n\n".join(texts)
+                # Sort by role
+                if role == 'assistant':
+                    assistant_texts.append(content_text)
+                else:
+                    user_texts.append(content_text)
+
+        return "\n\n".join(user_texts), "\n\n".join(assistant_texts)
 
     def _store_memories(self, memories: List[Dict]) -> List[Dict]:
         """Store extracted memories in the berry manager.
@@ -830,6 +971,59 @@ class AutoConcentrator:
                         tags=memory.get('tags', []) + ['confirmed', 'working'],
                         code_snippet=None
                     )
+                    stored.append(memory)
+
+                # === CLAUDE RESPONSE TYPES ===
+                elif memory['type'] == 'decision':
+                    # Claude's decisions with reasoning
+                    reasoning = memory.get('reasoning', '')
+                    solution_text = memory['decision']
+                    if reasoning:
+                        solution_text += f" (Reason: {reasoning})"
+                    result = self.bm.add_solution(
+                        problem="Decision",
+                        solution=solution_text,
+                        tags=memory.get('tags', []) + ['decision', 'claude-response'],
+                        code_snippet=None
+                    )
+                    if result and result.get('id'):
+                        self.bm.auto_cluster_memory(
+                            result['id'],
+                            memory.get('tags', []) + ['decision'],
+                            solution_text
+                        )
+                    stored.append(memory)
+
+                elif memory['type'] == 'summary':
+                    # Claude's summaries
+                    result = self.bm.add_solution(
+                        problem="Summary",
+                        solution=memory['content'],
+                        tags=memory.get('tags', []) + ['summary', 'claude-response'],
+                        code_snippet=None
+                    )
+                    if result and result.get('id'):
+                        self.bm.auto_cluster_memory(
+                            result['id'],
+                            memory.get('tags', []) + ['summary'],
+                            memory['content']
+                        )
+                    stored.append(memory)
+
+                elif memory['type'] == 'code_decision':
+                    # Code with context
+                    result = self.bm.add_solution(
+                        problem=memory['context'],
+                        solution=f"[{memory['language']}] code implementation",
+                        tags=memory.get('tags', []) + ['code', 'claude-response'],
+                        code_snippet=memory['code']
+                    )
+                    if result and result.get('id'):
+                        self.bm.auto_cluster_memory(
+                            result['id'],
+                            memory.get('tags', []),
+                            memory['context']
+                        )
                     stored.append(memory)
 
             except Exception as e:

@@ -584,7 +584,19 @@ class ClaudeMDManager:
         elif memory_type == 'solution':
             problem = process(item['problem'], 200)
             solution = process(item['solution'], 400)
-            # Mark pinned items
+            tags = item.get('tags', [])
+
+            # Special formatting for Claude response types
+            if 'decision' in tags:
+                return f"- **🧠 Decision**: {solution}"
+            elif 'summary' in tags:
+                return f"- **📋 Summary**: {solution}"
+            elif 'code' in tags and item.get('code_snippet'):
+                lang = next((t for t in tags if t not in ['code', 'claude-response']), 'code')
+                snippet = item['code_snippet'][:200] + "..." if len(item.get('code_snippet', '')) > 200 else item.get('code_snippet', '')
+                return f"- **{problem}**: `{lang}` implementation\n  ```\n  {snippet}\n  ```"
+
+            # Standard solution format
             pin_marker = " 📌" if item.get('pinned') else ""
             return f"- **{problem}**{pin_marker}: {solution}"
         elif memory_type == 'error':
@@ -1164,6 +1176,10 @@ Mid-Session Context:
   member feedback <id> useful     Mark a memory as useful (increases gravity)
   member feedback <id> not-useful Mark a memory as not useful (decreases gravity)
 
+Analytics:
+  member stats                    Show memory analytics and gravity distribution
+  member stats --detailed         Show detailed breakdown with individual memories
+
 Active Task:
   member focus <task_id>          Set active task (highlighted in context)
   member focus --clear            Clear active task focus
@@ -1533,6 +1549,117 @@ fi
 
         bm.index["memory_gravity"] = gravity
         bm._save_index()
+        return
+
+    # Handle stats command - memory analytics
+    if args.task and args.task.startswith('stats'):
+        detailed = '--detailed' in args.task or '-d' in args.task
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        print("\n📊 MEMBERBERRIES ANALYTICS")
+        print("="*60)
+
+        # Basic stats
+        stats = bm.get_stats()
+        total = sum(v for v in stats.values() if isinstance(v, int))
+        print(f"\n📦 Memory Storage ({total} total)")
+        print("-"*40)
+        for mem_type, count in sorted(stats.items(), key=lambda x: -x[1] if isinstance(x[1], int) else 0):
+            if isinstance(count, int) and count > 0:
+                bar = "█" * min(count, 20)
+                print(f"  {mem_type:20} {bar} {count}")
+
+        # Gravity distribution
+        gravity = bm.index.get("memory_gravity", {})
+        if gravity:
+            print(f"\n⚫ Gravity Distribution ({len(gravity)} tracked)")
+            print("-"*40)
+
+            masses = [g.get("mass", 1) for g in gravity.values()]
+            if masses:
+                avg_mass = sum(masses) / len(masses)
+                max_mass = max(masses)
+                min_mass = min(masses)
+                print(f"  Average mass: {avg_mass:.2f}")
+                print(f"  Range: {min_mass:.2f} - {max_mass:.2f}")
+
+                # Distribution buckets
+                low = sum(1 for m in masses if m < 2)
+                med = sum(1 for m in masses if 2 <= m < 5)
+                high = sum(1 for m in masses if m >= 5)
+                print(f"\n  Low gravity (<2):    {'●' * low} {low}")
+                print(f"  Medium gravity (2-5): {'●' * med} {med}")
+                print(f"  High gravity (≥5):   {'●' * high} {high}")
+
+        # Task clusters
+        clusters = bm.index.get("task_clusters", {})
+        if clusters:
+            print(f"\n🎯 Task Clusters ({len(clusters)})")
+            print("-"*40)
+            for tid, cluster in sorted(clusters.items(), key=lambda x: -x[1].get("mass", 1)):
+                mem_count = len(cluster.get("memories", []))
+                mass = cluster.get("mass", 1)
+                active = " ← ACTIVE" if bm.index.get("active_task") == tid else ""
+                print(f"  [{tid[:8]}] {cluster['name'][:25]:25} mass:{mass:3} memories:{mem_count}{active}")
+
+        # Staleness report
+        now = datetime.now()
+        stale_count = 0
+        for mid, gdata in gravity.items():
+            last = gdata.get("last_accessed")
+            if last:
+                try:
+                    days = (now - datetime.fromisoformat(last)).days
+                    if days >= 7:
+                        stale_count += 1
+                except:
+                    pass
+
+        if stale_count > 0:
+            print(f"\n⏳ Staleness Report")
+            print("-"*40)
+            print(f"  {stale_count} memories inactive for 7+ days (decaying)")
+
+        # Learned signals
+        learned = bm.index.get("learned_signals", {})
+        emphasis = learned.get("emphasis", {})
+        effective = learned.get("effective", [])
+        if emphasis or effective:
+            print(f"\n🧠 Adaptive Learning")
+            print("-"*40)
+            if emphasis:
+                top_emphasis = sorted(emphasis.items(), key=lambda x: -x[1])[:5]
+                print(f"  Top emphasis words: {', '.join(w for w,_ in top_emphasis)}")
+            if effective:
+                print(f"  Effective signals: {', '.join(effective[:5])}")
+
+        # Pinned memories
+        pinned = bm.get_pinned_memories()
+        if pinned:
+            print(f"\n📌 Pinned Memories ({len(pinned)})")
+            print("-"*40)
+            for p in pinned:
+                sens = " 🔒" if p.get("sensitive") else ""
+                print(f"  [{p['id'][:8]}] {p['name'][:30]}{sens}")
+
+        # Detailed view
+        if detailed:
+            print(f"\n📋 Detailed Memory List")
+            print("-"*40)
+
+            # High gravity memories
+            high_grav = bm.get_high_gravity_memories(top_k=10)
+            if high_grav:
+                print("\nHighest Gravity:")
+                for m in high_grav:
+                    problem = m.get('problem', m.get('error_message', 'Unknown'))[:50]
+                    mass = m.get('_gravity_mass', 1)
+                    refs = m.get('_references', 0)
+                    print(f"  [{mass:.1f}⚫ {refs}refs] {problem}")
+
+        print("\n" + "="*60)
         return
 
     # Handle focus command - set active task for session

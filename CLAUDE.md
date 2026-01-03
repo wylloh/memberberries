@@ -53,25 +53,33 @@ Claude responds → [Hook: Concentrate] → Memories extracted
 
 <!-- MEMBERBERRIES CONTEXT - Auto-managed, do not edit below this line -->
 
-*Synced: 2026-01-02 17:52*
+*Synced: 2026-01-02 18:09*
 
 **How to use this context:**
 - 📌 Pinned = Protected info (credentials, configs) - preserve exactly
 - ⚫ High Gravity = Frequently referenced - likely relevant
-- Memories are ranked by importance; top items most critical
+- 🎯 Active Task = Current focus area - prioritize these memories
+- Memories ranked by importance; top items most critical
 
-*Current focus: Yes, let's please commit, and then work on implementing your suggestions! And is...*
+🎯 **Active Task: memory-analytics**
+   Analytics and visualization for memberberries memory system
+
+*Current query: Is there a way to automatically capture your responses/decisions? Those are at l...*
+
+## High Priority
+- **Repeated issue: to see:\n- Did the memory-analytics task gain mass**: (Auto-captured - user had to repeat this)
+- **Repeated issue: in the **same conversation session** - I have full ctx of everything we discussed**: (Auto-captured - user had to repeat this)
+- **Repeated issue: - we can see if the refreshed ctx helps**: (Auto-captured - user had to repeat this)
 
 ## Your Preferences
-- **coding_style**: Follow conventional commits: feat:, fix:, docs:, etc.
 - **coding_style**: Use type hints and docstrs for all public fns
+- **coding_style**: Follow conventional commits: feat:, fix:, docs:, etc.
 
 ## Relevant Solutions
-- **User need: proceed with the curr tasks if applicable'}]}
-
-{'model': 'claude-opus-4-5-20251101', 'id': 'msg_019YzHxdzC28enzgaaJ1pUmS', 'type': 'msg', 'role': 'assistant',...**: (Captured from conversation - pending resolution)
 - **How to test auto-concentrate**: Use --dry-run flag: py3 auto_concentrate.py --dry-run --text 'your text'
-- **User need: proceed with the curr tasks if applicable'}]}
 
-{'model': 'claude-opus-4-5-20251101', 'id': 'msg_016fz9ETaQzXxJaPd4eir2m7', 'type': 'msg', 'role': 'assistant',...**: (Captured from conversation - pending resolution)
+## Antipatterns (Avoid)
+- **Don't**: edit below this line -->\n\n*Synced: 2026-01-02 18:07*\n\n**How to use this ctx:**\n- 📌 Pinned = Protected info (credentials,...
+  - *Why*: Not recommended
+  - *Instead*: this ctx:**\n- 📌 Pinned = Protected info (credentials, configs) - preserve exactly\n- ⚫ High Gravity = Frequently referenced - likely relevant\n- 🎯 Active Task = curr focus area -...
 <!-- END MEMBERBERRIES -->
