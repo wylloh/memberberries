@@ -734,6 +734,29 @@ exit 0
         return True
 
 
+def _get_shell_config_path() -> Path:
+    """Detect the user's shell and return the appropriate config file path.
+
+    Returns:
+        Path to shell config file, or None if unknown shell
+    """
+    shell = os.environ.get("SHELL", "")
+    home = Path.home()
+
+    if "zsh" in shell:
+        return home / ".zshrc"
+    elif "bash" in shell:
+        # Prefer .bashrc on Linux, .bash_profile on macOS
+        if (home / ".bash_profile").exists():
+            return home / ".bash_profile"
+        return home / ".bashrc"
+    elif "fish" in shell:
+        return home / ".config" / "fish" / "config.fish"
+
+    # Default to .profile as fallback
+    return home / ".profile"
+
+
 def run_setup_wizard():
     """Run the full setup wizard."""
     print("\n" + "="*60)
@@ -778,23 +801,60 @@ def run_setup_wizard():
     # Step 5: Install member command
     print("\nStep 4: Installing 'member' command...")
     member_py = MEMBERBERRIES_DIR / "member.py"
-
-    # Check for writable bin directories
-    bin_paths = [Path("/usr/local/bin"), Path.home() / ".local/bin"]
     installed = False
+    needs_path_update = False
+    install_path = None
 
-    for bin_path in bin_paths:
-        if bin_path.exists() and os.access(bin_path, os.W_OK):
-            link_path = bin_path / "member"
+    # Try /usr/local/bin first (if writable)
+    if Path("/usr/local/bin").exists() and os.access("/usr/local/bin", os.W_OK):
+        install_path = Path("/usr/local/bin")
+    else:
+        # Use ~/.local/bin (create if needed)
+        local_bin = Path.home() / ".local" / "bin"
+        local_bin.mkdir(parents=True, exist_ok=True)
+        install_path = local_bin
+
+        # Check if ~/.local/bin is in PATH
+        current_path = os.environ.get("PATH", "")
+        if str(local_bin) not in current_path:
+            needs_path_update = True
+
+    # Create the symlink
+    if install_path:
+        link_path = install_path / "member"
+        try:
             if link_path.exists() or link_path.is_symlink():
                 link_path.unlink()
             link_path.symlink_to(member_py)
             print(f"  Created symlink: {link_path}")
             installed = True
-            break
+        except OSError as e:
+            print(f"  Warning: Could not create symlink: {e}")
+
+    # Update shell config if needed
+    if installed and needs_path_update:
+        shell_config = _get_shell_config_path()
+
+        if shell_config:
+            # Check if already in config
+            config_content = ""
+            if shell_config.exists():
+                config_content = shell_config.read_text()
+
+            if ".local/bin" not in config_content:
+                with open(shell_config, 'a') as f:
+                    f.write(f'\n# Added by Memberberries\nexport PATH="$HOME/.local/bin:$PATH"\n')
+                print(f"  Added ~/.local/bin to PATH in {shell_config.name}")
+                print(f"\n  NOTE: Run 'source {shell_config}' or restart your terminal")
+                print(f"        for the 'member' command to be available.")
+            else:
+                print(f"  ~/.local/bin already in {shell_config.name}")
+        else:
+            print(f"\n  Add this to your shell config:")
+            print(f'    export PATH="$HOME/.local/bin:$PATH"')
 
     if not installed:
-        print(f"\n  Add this alias to your shell config (~/.zshrc or ~/.bashrc):")
+        print(f"\n  Fallback: Add this alias to your shell config:")
         print(f"    alias member='python3 {member_py}'")
 
     # Done!
