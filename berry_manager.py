@@ -162,20 +162,161 @@ class BerryManager:
         }
 
         if self.index_path.exists():
-            with open(self.index_path, 'r') as f:
-                loaded = json.load(f)
-                # Merge with defaults to handle upgrades
-                for key in default_index:
-                    if key not in loaded:
-                        loaded[key] = default_index[key]
-                return loaded
+            try:
+                with open(self.index_path, 'r') as f:
+                    loaded = json.load(f)
+                    # Merge with defaults to handle upgrades
+                    for key in default_index:
+                        if key not in loaded:
+                            loaded[key] = default_index[key]
+                    return loaded
+            except json.JSONDecodeError as e:
+                # Index is corrupted - try to recover from backup
+                print(f"⚠️  Memory index corrupted at line {e.lineno}. Attempting recovery...")
+                return self._recover_from_backup(default_index)
+        return default_index
+
+    def _recover_from_backup(self, default_index: Dict) -> Dict:
+        """Attempt to recover index from backup files."""
+        backup_files = [
+            self.index_path.with_suffix('.json.bak'),
+            self.index_path.with_suffix('.json.bak2'),
+        ]
+
+        for backup_path in backup_files:
+            if backup_path.exists():
+                try:
+                    with open(backup_path, 'r') as f:
+                        loaded = json.load(f)
+                    print(f"✅ Recovered from backup: {backup_path.name}")
+
+                    # Move corrupted file aside
+                    corrupted_path = self.index_path.with_suffix('.json.corrupted')
+                    try:
+                        self.index_path.rename(corrupted_path)
+                    except:
+                        pass
+
+                    # Merge with defaults
+                    for key in default_index:
+                        if key not in loaded:
+                            loaded[key] = default_index[key]
+                    return loaded
+                except json.JSONDecodeError:
+                    continue  # Try next backup
+
+        # No valid backup found - start fresh
+        print("❌ No valid backup found. Starting with fresh memory index.")
+        print("   Run 'member report' to help diagnose the issue.")
+
+        # Move corrupted file aside
+        try:
+            corrupted_path = self.index_path.with_suffix('.json.corrupted')
+            self.index_path.rename(corrupted_path)
+            print(f"   Corrupted file saved as: {corrupted_path.name}")
+        except:
+            pass
+
         return default_index
     
     def _save_index(self):
-        """Save the memory index with secure permissions."""
-        with open(self.index_path, 'w') as f:
-            json.dump(self.index, f, indent=2)
-        self._set_file_permissions(self.index_path)
+        """Save the memory index with atomic write and validation.
+
+        Uses atomic write pattern to prevent corruption:
+        1. Create backup of existing file
+        2. Write to temporary file
+        3. Validate the JSON is readable
+        4. Atomically rename temp to target
+        """
+        import tempfile
+        import fcntl
+
+        # Sanitize all string content before saving
+        self._sanitize_index()
+
+        # Create backup before write (keep last 2 backups)
+        if self.index_path.exists():
+            backup_path = self.index_path.with_suffix('.json.bak')
+            backup_path2 = self.index_path.with_suffix('.json.bak2')
+            if backup_path.exists():
+                try:
+                    if backup_path2.exists():
+                        backup_path2.unlink()
+                    backup_path.rename(backup_path2)
+                except:
+                    pass
+            try:
+                import shutil
+                shutil.copy2(self.index_path, backup_path)
+            except:
+                pass
+
+        # Write to temporary file first
+        temp_fd, temp_path = tempfile.mkstemp(
+            suffix='.json',
+            prefix='berry_index_',
+            dir=self.base_path
+        )
+        temp_path = Path(temp_path)
+
+        try:
+            # Write with file locking to prevent concurrent writes
+            with os.fdopen(temp_fd, 'w') as f:
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except (IOError, OSError):
+                    # Could not acquire lock - another process is writing
+                    # Wait briefly and retry
+                    import time
+                    time.sleep(0.1)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+                json.dump(self.index, f, indent=2, ensure_ascii=True)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Validate the written JSON is readable
+            with open(temp_path, 'r') as f:
+                json.load(f)  # Will raise if invalid
+
+            # Atomic rename (on POSIX systems)
+            temp_path.rename(self.index_path)
+            self._set_file_permissions(self.index_path)
+
+        except Exception as e:
+            # Clean up temp file on failure
+            try:
+                temp_path.unlink()
+            except:
+                pass
+            raise RuntimeError(f"Failed to save index: {e}")
+
+    def _sanitize_index(self):
+        """Sanitize all string content in the index to prevent JSON corruption."""
+        def sanitize_string(s):
+            if not isinstance(s, str):
+                return s
+            # Remove control characters except newlines and tabs
+            import re
+            s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', s)
+            # Limit string length to prevent massive entries
+            if len(s) > 10000:
+                s = s[:10000] + '...[truncated]'
+            return s
+
+        def sanitize_dict(d):
+            if isinstance(d, dict):
+                return {k: sanitize_dict(v) for k, v in d.items()}
+            elif isinstance(d, list):
+                return [sanitize_dict(item) for item in d]
+            elif isinstance(d, str):
+                return sanitize_string(d)
+            else:
+                return d
+
+        # Sanitize the entire index
+        for key in self.index:
+            self.index[key] = sanitize_dict(self.index[key])
     
     def _get_project_hash(self, project_path: str) -> str:
         """Generate a hash for a project path."""
