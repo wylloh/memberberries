@@ -118,18 +118,14 @@ class BerryManager:
                 # Use current working directory
                 return Path.cwd() / ".memberberries"
 
-        # Auto mode: check for local .memberberries first
+        # Auto mode: prefer local (per-project) storage
+        # This ensures each project has its own memory index
         if storage_mode == 'auto':
             if project_path:
-                local_path = Path(project_path) / ".memberberries"
-                if local_path.exists():
-                    return local_path
-            # Check current directory
-            cwd_local = Path.cwd() / ".memberberries"
-            if cwd_local.exists():
-                return cwd_local
-            # Fall back to global
-            return global_path
+                # Always use project-local storage when project_path is provided
+                return Path(project_path) / ".memberberries"
+            # Use current directory for local storage
+            return Path.cwd() / ".memberberries"
 
         return global_path
     
