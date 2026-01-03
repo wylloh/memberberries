@@ -433,7 +433,87 @@ class BerryManager:
         # Sort by similarity
         scored_solutions.sort(reverse=True, key=lambda x: x[0])
         return [sol for _, sol in scored_solutions[:top_k]]
-    
+
+    def refine_memory(self, memory_id: str, new_content: str) -> bool:
+        """Update a memory with refined content.
+
+        This is used when Claude suggests improvements to low-quality memories
+        via the self-reflection mechanism.
+
+        Args:
+            memory_id: The ID (or prefix) of the memory to refine
+            new_content: The improved/refined content
+
+        Returns:
+            True if memory was found and updated, False otherwise
+        """
+        # Search all memory types for the ID
+        memory_types = [
+            ('solutions', 'problem'),
+            ('solutions', 'solution'),
+            ('errors', 'error_message'),
+            ('errors', 'resolution'),
+            ('antipatterns', 'pattern'),
+        ]
+
+        for mem_type, content_field in memory_types:
+            memories = self.index.get(mem_type, [])
+            for mem in memories:
+                if mem.get('id', '').startswith(memory_id):
+                    # Update the content field
+                    if content_field in mem:
+                        mem[content_field] = new_content
+
+                    # Mark as refined
+                    mem['refined'] = True
+                    mem['refined_at'] = datetime.now().isoformat()
+
+                    # Update embedding for the new content
+                    full_content = mem.get('problem', '') + mem.get('solution', '') + mem.get('error_message', '') + mem.get('resolution', '')
+                    mem['embedding'] = self._simple_embedding(full_content).tolist()
+
+                    self._save_index()
+                    return True
+
+        return False
+
+    def get_memories_needing_refinement(self) -> List[Dict]:
+        """Get all memories that may need refinement (low quality).
+
+        Returns:
+            List of memory dicts with quality issues
+        """
+        low_quality = []
+
+        for mem_type in ['solutions', 'errors', 'antipatterns']:
+            for mem in self.index.get(mem_type, []):
+                # Skip already refined memories
+                if mem.get('refined'):
+                    continue
+
+                # Check for quality issues
+                content = mem.get('problem', '') + mem.get('solution', '') + mem.get('error_message', '') + mem.get('resolution', '')
+
+                issues = 0
+                if len(content) < 20:
+                    issues += 1
+                if '→' in content:
+                    issues += 1
+                if content.count('{') > 2:
+                    issues += 1
+                if 'stop_reason' in content or 'input_tokens' in content:
+                    issues += 2
+
+                if issues >= 2:
+                    low_quality.append({
+                        'id': mem.get('id', '')[:8],
+                        'type': mem_type,
+                        'content': content[:100] + '...' if len(content) > 100 else content,
+                        'issues': issues
+                    })
+
+        return low_quality
+
     # SESSION MANAGEMENT
     
     def save_session_summary(self, summary: str, key_learnings: List[str] = None,

@@ -758,6 +758,41 @@ class ClaudeMDManager:
 
         return result
 
+    def _get_memory_quality(self, item: dict) -> tuple:
+        """Check memory quality and return (quality_indicator, needs_refinement).
+
+        Returns:
+            Tuple of (indicator_string, bool for needs_refinement)
+            - "" = good quality
+            - " ⚠️" = has minor issues
+            - " ❓" = needs refinement
+        """
+        # Get content to check
+        content = item.get('problem', '') + item.get('solution', '') + item.get('content', '')
+
+        issues = 0
+
+        # Check for quality problems
+        if len(content) < 20:
+            issues += 1
+        if '→' in content:  # Line numbers from stack traces
+            issues += 1
+        if content.count('{') > 2 or content.count('[') > 2:  # JSON-like
+            issues += 1
+        if '...' in content[-15:]:  # Truncated awkwardly
+            issues += 1
+        if 'stop_reason' in content or 'input_tokens' in content:  # API fragments
+            issues += 2
+        if 'MEMBERBERRIES' in content or 'Auto-managed' in content:  # Template text
+            issues += 2
+
+        if issues == 0:
+            return ("", False)
+        elif issues <= 1:
+            return (" ⚠️", False)
+        else:
+            return (" ❓", True)
+
     def _format_memory_item(self, memory_type: str, item: dict, compress: bool = True,
                             include_id: bool = True) -> str:
         """Format a single memory item for display.
@@ -782,6 +817,9 @@ class ClaudeMDManager:
         # Get ID prefix if available
         mem_id = item.get('id', '')[:8] if include_id and item.get('id') else ''
         id_prefix = f"`{mem_id}` " if mem_id else ""
+
+        # Get quality indicator
+        quality_indicator, _ = self._get_memory_quality(item)
 
         if memory_type == 'pinned':
             name = item.get('name', 'Pinned')
@@ -809,12 +847,12 @@ class ClaudeMDManager:
 
             # Standard solution format
             pin_marker = " 📌" if item.get('pinned') else ""
-            return f"- {id_prefix}**{problem}**{pin_marker}: {solution}"
+            return f"- {id_prefix}**{problem}**{pin_marker}{quality_indicator}: {solution}"
         elif memory_type == 'error':
             msg = process(item['error_message'], 200)
             resolution = process(item['resolution'], 400)
             # Structured format for debugging
-            lines = [f"- {id_prefix}**Error**: {msg}"]
+            lines = [f"- {id_prefix}**Error**{quality_indicator}: {msg}"]
             lines.append(f"  - *Resolution*: {resolution}")
             # Add actionable first step if we can infer one
             if 'check' in resolution.lower() or 'verify' in resolution.lower():
@@ -828,7 +866,7 @@ class ClaudeMDManager:
             pattern = process(item['pattern'], 200)
             reason = process(item['reason'], 200)
             alt = process(item['alternative'], 200)
-            return f"- {id_prefix}**Don't**: {pattern}\n  - *Why*: {reason}\n  - *Instead*: {alt}"
+            return f"- {id_prefix}**Don't**{quality_indicator}: {pattern}\n  - *Why*: {reason}\n  - *Instead*: {alt}"
         elif memory_type == 'git_convention':
             pattern = process(item['pattern'], 200)
             example = process(item['example'], 150)
@@ -951,6 +989,7 @@ class ClaudeMDManager:
         seen_ids = set()
         sections = [header]
         items_added = 0
+        memories_needing_refinement = []  # Track low-quality memories
 
         for group_name, memory_type, items, _ in memory_groups:
             if current_tokens >= max_tokens:
@@ -973,6 +1012,11 @@ class ClaudeMDManager:
                     if item_id in seen_ids:
                         continue
                     seen_ids.add(item_id)
+
+                # Check quality and track if needs refinement
+                _, needs_refinement = self._get_memory_quality(item)
+                if needs_refinement and item_id:
+                    memories_needing_refinement.append(item_id[:8])
 
                 formatted = self._format_memory_item(memory_type, item)
                 item_tokens = self._estimate_tokens(formatted)
@@ -999,6 +1043,14 @@ class ClaudeMDManager:
             ctx_text = "\n".join(ctx_lines)
             if current_tokens + self._estimate_tokens(ctx_text) <= max_tokens:
                 sections.append(ctx_text)
+
+        # Add self-reflection instruction if there are low-quality memories
+        if memories_needing_refinement and current_tokens < max_tokens - 50:
+            refinement_hint = (
+                "\n*💭 Some memories marked with ❓ may need refinement. "
+                "To improve: `memberberry refine <id>: <better summary>`*"
+            )
+            sections.append(refinement_hint)
 
         # If no content was generated, show a friendly message
         if items_added == 0:
@@ -1492,6 +1544,11 @@ Memory Lookup:
 Active Task:
   member focus <task_id>          Set active task (highlighted in context)
   member focus --clear            Clear active task focus
+
+Maintenance:
+  member update                   Pull latest memberberries and regenerate hooks
+  member clean                    Remove low-quality and duplicate memories
+  member report                   Generate bug report with system info
         """
     )
 
@@ -2098,6 +2155,194 @@ fi
 
         print(f"Unknown config option: {parts[1]}")
         print("Available options: api-key")
+        return
+
+    # Handle update command - pull latest memberberries and regenerate hooks
+    if args.task == 'update':
+        print("\n📦 Updating memberberries...")
+
+        # Check if running from git repo
+        if not (MEMBERBERRIES_DIR / '.git').exists():
+            print("❌ Memberberries not installed via git.")
+            print(f"   Directory: {MEMBERBERRIES_DIR}")
+            print("\nTo update manually:")
+            print("  1. Download the latest version")
+            print("  2. Replace files in the memberberries directory")
+            print("  3. Run: member --regenerate-hooks")
+            return
+
+        # Pull latest changes
+        print(f"Pulling from {MEMBERBERRIES_DIR}...")
+        result = subprocess.run(
+            ['git', 'pull'],
+            cwd=MEMBERBERRIES_DIR,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print(f"❌ Git pull failed:")
+            print(result.stderr)
+            return
+
+        if 'Already up to date' in result.stdout:
+            print("✅ Already up to date!")
+        else:
+            print(result.stdout.strip())
+            print("✅ Updated successfully!")
+
+        # Regenerate hooks for current project
+        project_path = Path(args.project) if args.project else Path.cwd()
+        if ClaudeCodeInstaller.is_installed():
+            print(f"\nRegenerating hooks for {project_path}...")
+            ClaudeCodeInstaller.setup_hooks(project_path)
+            print("✅ Hooks regenerated!")
+
+        # Show recent changes hint
+        print("\n💡 To see recent changes:")
+        print(f"   cd {MEMBERBERRIES_DIR} && git log --oneline -5")
+        return
+
+    # Handle clean command - remove low-quality and duplicate memories
+    if args.task == 'clean':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        print("\n🧹 Cleaning memories...")
+
+        # Get low-quality memories
+        low_quality = bm.get_memories_needing_refinement()
+        if low_quality:
+            print(f"\nFound {len(low_quality)} low-quality memories:")
+            for mem in low_quality[:5]:  # Show first 5
+                print(f"  - `{mem['id']}` ({mem['type']}): {mem['content'][:60]}...")
+
+        # Garbage content patterns to check
+        garbage_markers = [
+            'stop_reason', 'input_tokens', 'cache_creation',
+            'tool_use_id', 'MEMBERBERRIES CONTEXT',
+            '}}], ', "': [{'",
+        ]
+
+        # Clean each memory type
+        removed = 0
+        for mem_type in ['solutions', 'errors', 'antipatterns']:
+            memories = bm.index.get(mem_type, [])
+            original_count = len(memories)
+
+            # Filter out garbage
+            clean = []
+            for m in memories:
+                content = m.get('problem', '') + m.get('solution', '') + m.get('error_message', '') + m.get('resolution', '') + m.get('pattern', '')
+
+                is_garbage = False
+                for marker in garbage_markers:
+                    if marker in content:
+                        is_garbage = True
+                        break
+
+                # Also check for excessive special chars
+                if len(content) > 20:
+                    special_ratio = sum(1 for c in content if c in '{}[]"\':,') / len(content)
+                    if special_ratio > 0.15:
+                        is_garbage = True
+
+                # Check for line number patterns (stack traces)
+                if re.search(r'\d{2,}→', content):
+                    is_garbage = True
+
+                if not is_garbage:
+                    clean.append(m)
+
+            removed += original_count - len(clean)
+            bm.index[mem_type] = clean
+
+        bm._save_index()
+
+        print(f"\n✅ Removed {removed} low-quality memories")
+
+        if low_quality and removed < len(low_quality):
+            remaining = len(low_quality) - removed
+            print(f"\n💡 {remaining} memories still need refinement.")
+            print("   Use `memberberry refine <id>: <better summary>` in conversation")
+            print("   to help Claude improve them.")
+
+        return
+
+    # Handle report command - generate bug report with context
+    if args.task == 'report':
+        import platform
+        import sys
+
+        print("\n📋 Generating Memberberries Bug Report...")
+        print("=" * 50)
+
+        # System info
+        print("\n## System Information\n")
+        print(f"- **OS**: {platform.system()} {platform.release()}")
+        print(f"- **Python**: {sys.version.split()[0]}")
+        print(f"- **Memberberries**: {MEMBERBERRIES_DIR}")
+
+        # Check Claude Code
+        claude_installed = ClaudeCodeInstaller.is_installed()
+        print(f"- **Claude Code**: {'Installed' if claude_installed else 'Not found'}")
+
+        # Memory stats (anonymized)
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+
+        try:
+            bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+            print(f"\n## Memory Statistics\n")
+            print(f"- **Solutions**: {len(bm.index.get('solutions', []))}")
+            print(f"- **Errors**: {len(bm.index.get('errors', []))}")
+            print(f"- **Antipatterns**: {len(bm.index.get('antipatterns', []))}")
+            print(f"- **Preferences**: {len(bm.index.get('preferences', []))}")
+            print(f"- **Pinned**: {len(bm.index.get('pinned', []))}")
+
+            # Check for low-quality memories
+            low_quality = bm.get_memories_needing_refinement()
+            if low_quality:
+                print(f"- **Low-quality memories**: {len(low_quality)}")
+        except Exception as e:
+            print(f"\n## Memory Statistics\n")
+            print(f"- **Error loading memories**: {type(e).__name__}")
+
+        # Hooks status
+        print(f"\n## Hooks Status\n")
+        hooks_file = project_path / ".claude" / "settings.json"
+        if hooks_file.exists():
+            try:
+                settings = json.loads(hooks_file.read_text())
+                hooks = settings.get('hooks', {})
+                print(f"- **PreToolUse hooks**: {len(hooks.get('PreToolUse', []))}")
+                print(f"- **PostToolUse hooks**: {len(hooks.get('PostToolUse', []))}")
+                print(f"- **Stop hooks**: {len(hooks.get('Stop', []))}")
+            except:
+                print("- **Error reading hooks config**")
+        else:
+            print("- **No hooks configured**")
+
+        # Issue template
+        print(f"\n## Issue Description\n")
+        print("<!-- Describe your issue here -->")
+        print("")
+        print("### Steps to Reproduce")
+        print("1. ")
+        print("2. ")
+        print("3. ")
+        print("")
+        print("### Expected Behavior")
+        print("<!-- What should happen? -->")
+        print("")
+        print("### Actual Behavior")
+        print("<!-- What actually happened? -->")
+
+        print("\n" + "=" * 50)
+        print("\n📋 Copy the above and paste into a new issue at:")
+        print("   https://github.com/wylloh/memberberries/issues/new")
+        print("\n💡 Tip: Add any error messages or screenshots to help diagnose.")
         return
 
     # Handle deep command - AI-powered context retrieval

@@ -321,6 +321,15 @@ python memberberries.py search "database connection pooling"
 | `member config` | View current configuration |
 | `member config api-key <key>` | Set Anthropic API key for deep scan |
 
+### Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `member update` | Pull latest memberberries and regenerate hooks |
+| `member clean` | Remove low-quality and duplicate memories |
+| `member report` | Generate bug report with system info for GitHub issues |
+| `member --regenerate-hooks` | Fix stale hook paths after moving installation |
+
 ### Pinned Memories
 
 | Command | Description |
@@ -398,7 +407,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - ✅ Auto-detection of tech stack and architecture
 - ✅ Claude Code installation guidance
 
-### v1.2 (Current)
+### v1.2
 - ✅ AI-powered deep scan (`member deep`) using Claude Haiku
 - ✅ Memory ID system for token-efficient context
 - ✅ Memory lookup by ID (`member lookup`)
@@ -408,6 +417,15 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - ✅ Auto-capture of Claude's decisions and summaries
 - ✅ Apple Silicon (arm64) native support
 - ✅ Staleness decay for aging memories
+
+### v1.3 (Current)
+- ✅ `member update` - Self-update from git + regenerate hooks
+- ✅ `member clean` - Remove low-quality/duplicate memories
+- ✅ `member report` - Generate bug reports with system context
+- ✅ Memory quality indicators (⚠️ and ❓ markers)
+- ✅ Self-reflection refinement system (Claude can improve memories)
+- ✅ Enhanced garbage filtering (API fragments, template text, stack traces)
+- ✅ Improved error+resolution extraction patterns
 - [ ] Vector database support (optional)
 - [ ] Better embedding models for juicing
 - [ ] Test coverage

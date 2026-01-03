@@ -415,14 +415,46 @@ class MemoryExtractor:
         return min(score, 10)
 
     def _is_garbage_content(self, text: str) -> bool:
-        """Check if text is garbage (raw JSON, API responses, etc.)."""
+        """Check if text is garbage (raw JSON, API responses, template text, etc.)."""
         garbage_markers = [
+            # Raw API response fragments
             "{'model':", "'type': 'msg'", "'role': 'assistant'",
             '"model":', '"type": "message"', '"role": "assistant"',
-            '<', '</', 'claude-opus', 'claude-sonnet',
+            'claude-opus', 'claude-sonnet', 'claude-haiku',
             'msg_01', '{"id":', 'noreply@anthropic',
+            'stop_reason', 'stop_sequence', 'input_tokens',
+            'cache_creation_input_tokens', 'cache_read_input_tokens',
+            'tool_use_id', 'tool_result', 'output_tokens',
+
+            # Template text from CLAUDE.md (should never be stored as memory)
+            'MEMBERBERRIES CONTEXT', 'Auto-managed, do not edit',
+            'END MEMBERBERRIES', 'How to use this context:',
+            'Pinned = Protected info', 'High Gravity = Frequently',
+            'Active Task = Current focus', 'Memories ranked by importance',
+
+            # Malformed JSON/data fragments
+            '}}], ', "[{'", "'}]", '}], ', "': [{'",
+            "'content': [{'", '"content": [{"',
         ]
-        return any(marker in text for marker in garbage_markers)
+
+        # Check for explicit markers
+        for marker in garbage_markers:
+            if marker in text:
+                return True
+
+        # Check for line number patterns (captured stack traces)
+        # Pattern: digits followed by arrow (e.g., "1380→")
+        if re.search(r'\d{2,}→', text):
+            return True
+
+        # Check for excessive special characters (likely JSON/code dump)
+        if len(text) > 20:
+            special_chars = sum(1 for c in text if c in '{}[]"\':,')
+            special_ratio = special_chars / len(text)
+            if special_ratio > 0.15:
+                return True
+
+        return False
 
     def extract_user_needs(self, text: str) -> List[Dict]:
         """Extract user needs/requests from 'please' and request patterns."""
@@ -627,27 +659,70 @@ class MemoryExtractor:
         return solutions[:3]  # Limit to prevent spam
 
     def extract_error_patterns(self, text: str) -> List[Dict]:
-        """Extract error patterns and their resolutions."""
+        """Extract error patterns and their resolutions.
+
+        Improved to:
+        - Detect structured error → resolution patterns
+        - Filter out raw stack traces without resolutions
+        - Capture "fixed X by Y" patterns
+        """
         errors = []
 
-        for pattern in self.ERROR_PATTERNS:
+        # First, try to extract structured error+resolution pairs
+        structured_patterns = [
+            # "Error: X → Fix: Y" or "Error: X - Resolution: Y"
+            r"(?:error|issue|problem):\s*([^→\-\n]+)(?:→|\s*-\s*)(?:fix|solution|resolution):\s*([^\n]+)",
+            # "Fixed X by Y" or "Resolved X by Y"
+            r"(?:fixed|resolved|solved)\s+(?:the\s+)?([^.]+?)\s+by\s+([^.]+)",
+            # "X was caused by Y" (error is X, resolution context is Y)
+            r"([^.]+?)\s+(?:was\s+)?(?:caused\s+by|due\s+to)\s+([^.]+)",
+            # "The solution to X is Y"
+            r"(?:the\s+)?solution\s+to\s+([^.]+?)\s+is\s+([^.]+)",
+        ]
+
+        for pattern in structured_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
-                error_msg = match.group(1).strip() if match.groups() else match.group(0).strip()
+                error_desc = match.group(1).strip()
+                resolution = match.group(2).strip()
 
-                # Look for resolution after the error
-                after_error = text[match.end():match.end() + 800]
-                resolution = self._extract_resolution(after_error)
-
-                if resolution and len(error_msg) > 10:
-                    error_truncated = self._smart_truncate(error_msg, max_len=400)
-                    resolution_truncated = self._smart_truncate(resolution, max_len=800)
+                # Validate: both parts should be meaningful
+                if (len(error_desc) > 10 and len(resolution) > 10 and
+                    not self._is_garbage_content(error_desc) and
+                    not self._is_garbage_content(resolution)):
                     errors.append({
                         'type': 'error',
-                        'error_message': error_truncated,
-                        'resolution': resolution_truncated,
-                        'tags': self.extract_tags(error_msg + " " + resolution)
+                        'error_message': self._smart_truncate(error_desc, max_len=300),
+                        'resolution': self._smart_truncate(resolution, max_len=400),
+                        'tags': self.extract_tags(error_desc + " " + resolution),
+                        'structured': True
                     })
+
+        # If no structured patterns found, fall back to original method
+        if not errors:
+            for pattern in self.ERROR_PATTERNS:
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    error_msg = match.group(1).strip() if match.groups() else match.group(0).strip()
+
+                    # Skip garbage content (raw stack traces, etc.)
+                    if self._is_garbage_content(error_msg):
+                        continue
+
+                    # Look for resolution after the error
+                    after_error = text[match.end():match.end() + 800]
+                    resolution = self._extract_resolution(after_error)
+
+                    # Only store if we have a meaningful resolution
+                    if resolution and len(error_msg) > 10 and len(resolution) > 10:
+                        error_truncated = self._smart_truncate(error_msg, max_len=300)
+                        resolution_truncated = self._smart_truncate(resolution, max_len=400)
+                        errors.append({
+                            'type': 'error',
+                            'error_message': error_truncated,
+                            'resolution': resolution_truncated,
+                            'tags': self.extract_tags(error_msg + " " + resolution)
+                        })
 
         return errors[:2]  # Limit
 
@@ -715,6 +790,41 @@ class MemoryExtractor:
             return alt_match.group(1).strip()
         return None
 
+    def extract_memory_refinements(self, text: str) -> List[Dict]:
+        """Extract memory refinements from Claude's response.
+
+        Detects patterns like:
+        - memberberry refine <id>: <better summary>
+        - refine memory <id>: <better summary>
+
+        Returns:
+            List of refinement dicts with memory_id and new_content
+        """
+        refinements = []
+
+        # Pattern: memberberry refine <id>: <summary>
+        patterns = [
+            r"memberberry\s+refine\s+([a-f0-9]{6,12}):\s*(.+?)(?:\n|$)",
+            r"refine\s+memory\s+([a-f0-9]{6,12}):\s*(.+?)(?:\n|$)",
+            r"`([a-f0-9]{6,12})`\s*(?:should be|better as|refine to):\s*(.+?)(?:\n|$)",
+        ]
+
+        for pattern in patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                memory_id = match.group(1).strip()
+                new_summary = match.group(2).strip()
+
+                # Validate the refinement
+                if len(new_summary) > 10 and not self._is_garbage_content(new_summary):
+                    refinements.append({
+                        'type': 'refinement',
+                        'memory_id': memory_id,
+                        'new_content': new_summary,
+                    })
+
+        return refinements
+
     def extract_all(self, text: str, is_assistant: bool = False) -> List[Dict]:
         """Extract all types of memories from text using semantic signals.
 
@@ -729,6 +839,8 @@ class MemoryExtractor:
             memories.extend(self.extract_claude_decisions(text))
             memories.extend(self.extract_claude_summaries(text))
             memories.extend(self.extract_code_decisions(text))
+            # Check for memory refinements from Claude
+            memories.extend(self.extract_memory_refinements(text))
 
         # Signal-based extractions (high priority)
         memories.extend(self.extract_forgotten_items(text))      # "again" - must remember!
@@ -1025,6 +1137,15 @@ class AutoConcentrator:
                             memory['context']
                         )
                     stored.append(memory)
+
+                elif memory['type'] == 'refinement':
+                    # Apply memory refinement from Claude's self-reflection
+                    memory_id = memory.get('memory_id', '')
+                    new_content = memory.get('new_content', '')
+                    if memory_id and new_content:
+                        success = self.bm.refine_memory(memory_id, new_content)
+                        if success:
+                            stored.append(memory)
 
             except Exception as e:
                 # Silently skip failed extractions
