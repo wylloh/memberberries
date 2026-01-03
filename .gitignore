@@ -50,3 +50,6 @@ embeddings_cache/
 
 # Claude Code hooks (user-specific)
 .claude/
+
+# CLAUDE.md is auto-generated per user by memberberries
+CLAUDE.md
