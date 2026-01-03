@@ -554,16 +554,19 @@ class ClaudeMDManager:
 
         return result
 
-    def _format_memory_item(self, memory_type: str, item: dict, compress: bool = True) -> str:
+    def _format_memory_item(self, memory_type: str, item: dict, compress: bool = True,
+                            include_id: bool = True) -> str:
         """Format a single memory item for display.
 
         Uses smart truncation to preserve meaningful context.
         Applies shorthand compression to save tokens.
+        Includes memory ID for lookup capability.
 
         Args:
             memory_type: Type of memory (pinned, preference, solution, etc.)
             item: Memory data dictionary
             compress: Whether to apply shorthand compression (default: True)
+            include_id: Whether to include memory ID for lookup (default: True)
         """
         def process(text: str, max_len: int) -> str:
             """Truncate and optionally compress text."""
@@ -572,15 +575,19 @@ class ClaudeMDManager:
                 result = self._compress_shorthand(result)
             return result
 
+        # Get ID prefix if available
+        mem_id = item.get('id', '')[:8] if include_id and item.get('id') else ''
+        id_prefix = f"`{mem_id}` " if mem_id else ""
+
         if memory_type == 'pinned':
             name = item.get('name', 'Pinned')
             content = process(item.get('content', ''), 500)
             category = item.get('category', '')
             sensitive_marker = " 🔒" if item.get('sensitive') else ""
-            return f"- **{name}**{sensitive_marker} [{category}]: {content}"
+            return f"- {id_prefix}**{name}**{sensitive_marker} [{category}]: {content}"
         elif memory_type == 'preference':
             content = process(item['content'], 400)
-            return f"- **{item['category']}**: {content}"
+            return f"- {id_prefix}**{item['category']}**: {content}"
         elif memory_type == 'solution':
             problem = process(item['problem'], 200)
             solution = process(item['solution'], 400)
@@ -588,22 +595,22 @@ class ClaudeMDManager:
 
             # Special formatting for Claude response types
             if 'decision' in tags:
-                return f"- **🧠 Decision**: {solution}"
+                return f"- {id_prefix}**🧠 Decision**: {solution}"
             elif 'summary' in tags:
-                return f"- **📋 Summary**: {solution}"
+                return f"- {id_prefix}**📋 Summary**: {solution}"
             elif 'code' in tags and item.get('code_snippet'):
                 lang = next((t for t in tags if t not in ['code', 'claude-response']), 'code')
                 snippet = item['code_snippet'][:200] + "..." if len(item.get('code_snippet', '')) > 200 else item.get('code_snippet', '')
-                return f"- **{problem}**: `{lang}` implementation\n  ```\n  {snippet}\n  ```"
+                return f"- {id_prefix}**{problem}**: `{lang}` implementation\n  ```\n  {snippet}\n  ```"
 
             # Standard solution format
             pin_marker = " 📌" if item.get('pinned') else ""
-            return f"- **{problem}**{pin_marker}: {solution}"
+            return f"- {id_prefix}**{problem}**{pin_marker}: {solution}"
         elif memory_type == 'error':
             msg = process(item['error_message'], 200)
             resolution = process(item['resolution'], 400)
             # Structured format for debugging
-            lines = [f"- **Error**: {msg}"]
+            lines = [f"- {id_prefix}**Error**: {msg}"]
             lines.append(f"  - *Resolution*: {resolution}")
             # Add actionable first step if we can infer one
             if 'check' in resolution.lower() or 'verify' in resolution.lower():
@@ -617,17 +624,17 @@ class ClaudeMDManager:
             pattern = process(item['pattern'], 200)
             reason = process(item['reason'], 200)
             alt = process(item['alternative'], 200)
-            return f"- **Don't**: {pattern}\n  - *Why*: {reason}\n  - *Instead*: {alt}"
+            return f"- {id_prefix}**Don't**: {pattern}\n  - *Why*: {reason}\n  - *Instead*: {alt}"
         elif memory_type == 'git_convention':
             pattern = process(item['pattern'], 200)
             example = process(item['example'], 150)
-            return f"- **{item['convention_type']}**: {pattern}\n  - *Example*: `{example}`"
+            return f"- {id_prefix}**{item['convention_type']}**: {pattern}\n  - *Example*: `{example}`"
         elif memory_type == 'testing':
             pattern = process(item['pattern'], 300)
-            return f"- **{item['strategy']} ({item['framework']})**: {pattern}"
+            return f"- {id_prefix}**{item['strategy']} ({item['framework']})**: {pattern}"
         elif memory_type == 'api_note':
             notes = process(item['notes'], 400)
-            return f"- **{item['service_name']}**: {notes}"
+            return f"- {id_prefix}**{item['service_name']}**: {notes}"
         return ""
 
     def generate_memberberries_section(self, query: str = None, max_tokens: int = 1500) -> str:
@@ -1180,6 +1187,10 @@ Analytics:
   member stats                    Show memory analytics and gravity distribution
   member stats --detailed         Show detailed breakdown with individual memories
 
+Memory Lookup:
+  member lookup <id>              Show full content of a memory by ID
+  member expand                   Expand all memories in current context (full detail)
+
 Active Task:
   member focus <task_id>          Set active task (highlighted in context)
   member focus --clear            Clear active task focus
@@ -1551,6 +1562,67 @@ fi
         bm._save_index()
         return
 
+    # Handle lookup command - get full memory content by ID
+    if args.task and args.task.startswith('lookup '):
+        parts = args.task.split()
+        if len(parts) < 2:
+            print("Usage: member lookup <memory_id>")
+            return
+
+        memory_id = parts[1]
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        # Search across all memory types for matching ID
+        found = False
+        for mem_type in ['solutions', 'errors', 'preferences', 'antipatterns', 'git_conventions', 'testing', 'api_notes']:
+            memories = bm.index.get(mem_type, [])
+            for m in memories:
+                mem_id = m.get('id', '')
+                if mem_id.startswith(memory_id) or memory_id in mem_id:
+                    found = True
+                    print(f"\n📖 Memory: {mem_id}")
+                    print("="*60)
+                    print(f"Type: {mem_type}")
+                    print(f"Created: {m.get('created_at', 'Unknown')}")
+                    if m.get('tags'):
+                        print(f"Tags: {', '.join(m['tags'])}")
+                    print("-"*60)
+                    # Print full content based on type
+                    if 'problem' in m:
+                        print(f"Problem: {m['problem']}")
+                    if 'solution' in m:
+                        print(f"Solution: {m['solution']}")
+                    if 'error_message' in m:
+                        print(f"Error: {m['error_message']}")
+                    if 'resolution' in m:
+                        print(f"Resolution: {m['resolution']}")
+                    if 'content' in m:
+                        print(f"Content: {m['content']}")
+                    if 'pattern' in m:
+                        print(f"Pattern: {m['pattern']}")
+                    if 'alternative' in m:
+                        print(f"Alternative: {m['alternative']}")
+                    if m.get('code_snippet'):
+                        print(f"\nCode:\n{m['code_snippet']}")
+                    print()
+
+        # Also check pinned
+        for p in bm.get_pinned_memories():
+            if p.get('id', '').startswith(memory_id) or memory_id in p.get('id', ''):
+                found = True
+                print(f"\n📌 Pinned Memory: {p.get('id', '')}")
+                print("="*60)
+                print(f"Name: {p.get('name', 'Unnamed')}")
+                print(f"Category: {p.get('category', 'uncategorized')}")
+                print(f"Content: {p.get('content', '')}")
+                print()
+
+        if not found:
+            print(f"No memory found matching ID: {memory_id}")
+        return
+
     # Handle stats command - memory analytics
     if args.task and args.task.startswith('stats'):
         detailed = '--detailed' in args.task or '-d' in args.task
@@ -1659,6 +1731,23 @@ fi
                     refs = m.get('_references', 0)
                     print(f"  [{mass:.1f}⚫ {refs}refs] {problem}")
 
+        print("\n" + "="*60)
+        return
+
+    # Handle expand command - show all memories in full detail
+    if args.task == 'expand':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        manager = ClaudeMDManager(project_path, storage_mode)
+
+        print("\n" + "="*60)
+        print("📖 EXPANDED MEMORY CONTEXT")
+        print("="*60)
+        print("(Claude: Full detail for all relevant memories)\n")
+
+        # Generate expanded context without token limit
+        context = manager.generate_memberberries_section(max_tokens=10000)
+        print(context)
         print("\n" + "="*60)
         return
 
