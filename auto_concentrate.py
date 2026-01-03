@@ -386,6 +386,16 @@ class MemoryExtractor:
 
         return min(score, 10)
 
+    def _is_garbage_content(self, text: str) -> bool:
+        """Check if text is garbage (raw JSON, API responses, etc.)."""
+        garbage_markers = [
+            "{'model':", "'type': 'msg'", "'role': 'assistant'",
+            '"model":', '"type": "message"', '"role": "assistant"',
+            '<', '</', 'claude-opus', 'claude-sonnet',
+            'msg_01', '{"id":', 'noreply@anthropic',
+        ]
+        return any(marker in text for marker in garbage_markers)
+
     def extract_user_needs(self, text: str) -> List[Dict]:
         """Extract user needs/requests from 'please' and request patterns."""
         needs = []
@@ -402,7 +412,8 @@ class MemoryExtractor:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 need = match.group(1).strip()
-                if len(need) > 10:
+                # Skip garbage content and too-short matches
+                if len(need) > 10 and not self._is_garbage_content(need):
                     # Smart truncation: preserve complete sentences/phrases
                     truncated = self._smart_truncate(need, max_len=500)
                     needs.append({
@@ -430,7 +441,8 @@ class MemoryExtractor:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 item = match.group(1).strip()
-                if len(item) > 10:
+                # Skip garbage content
+                if len(item) > 10 and not self._is_garbage_content(item):
                     # Smart truncation with larger limit for forgotten items (high value)
                     truncated = self._smart_truncate(item, max_len=600)
                     forgotten.append({

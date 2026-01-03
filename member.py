@@ -590,7 +590,17 @@ class ClaudeMDManager:
         elif memory_type == 'error':
             msg = process(item['error_message'], 200)
             resolution = process(item['resolution'], 400)
-            return f"- **{msg}**: {resolution}"
+            # Structured format for debugging
+            lines = [f"- **Error**: {msg}"]
+            lines.append(f"  - *Resolution*: {resolution}")
+            # Add actionable first step if we can infer one
+            if 'check' in resolution.lower() or 'verify' in resolution.lower():
+                lines.append(f"  - *First*: Verify the fix applies to current situation")
+            elif 'install' in resolution.lower() or 'add' in resolution.lower():
+                lines.append(f"  - *First*: Check if dependency already exists")
+            elif 'config' in resolution.lower() or 'setting' in resolution.lower():
+                lines.append(f"  - *First*: Locate and review config file")
+            return "\n".join(lines)
         elif memory_type == 'antipattern':
             pattern = process(item['pattern'], 200)
             reason = process(item['reason'], 200)
@@ -628,11 +638,23 @@ class ClaudeMDManager:
             "**How to use this context:**",
             "- 📌 Pinned = Protected info (credentials, configs) - preserve exactly",
             "- ⚫ High Gravity = Frequently referenced - likely relevant",
-            "- Memories are ranked by importance; top items most critical",
+            "- 🎯 Active Task = Current focus area - prioritize these memories",
+            "- Memories ranked by importance; top items most critical",
         ]
+
+        # Show active task if set
+        active_task_id = self.bm.index.get("active_task")
+        if active_task_id:
+            clusters = self.bm.index.get("task_clusters", {})
+            if active_task_id in clusters:
+                task = clusters[active_task_id]
+                header_lines.append(f"\n🎯 **Active Task: {task['name']}**")
+                if task.get('description'):
+                    header_lines.append(f"   {task['description']}")
+
         if query:
             display_query = query[:80] + "..." if len(query) > 80 else query
-            header_lines.append(f"\n*Current focus: {display_query}*")
+            header_lines.append(f"\n*Current query: {display_query}*")
 
         header = "\n".join(header_lines)
         current_tokens = self._estimate_tokens(header)
@@ -646,7 +668,13 @@ class ClaudeMDManager:
         if pinned:
             memory_groups.append(('📌 Pinned', 'pinned', pinned, 200))
 
-        # Priority 0.5: High-gravity memories (most referenced/important)
+        # Priority 0.5: Active task memories (if task is focused)
+        if active_task_id:
+            task_memories = self.bm.get_task_memories(active_task_id, include_subtasks=True)
+            if task_memories:
+                memory_groups.append(('🎯 Active Task Memories', 'solution', task_memories[:5], 175))
+
+        # Priority 0.6: High-gravity memories (most referenced/important)
         high_gravity = self.bm.get_high_gravity_memories(top_k=3)
         if high_gravity:
             memory_groups.append(('⚫ High Gravity', 'solution', high_gravity, 150))
@@ -1129,6 +1157,16 @@ Task Clusters (Gravitational Memory Organization):
 Git Workflow:
   member --install-hook           Install git pre-commit hook (auto-cleans CLAUDE.md)
   member --clean                  Manually clean memberberries section before commit
+
+Mid-Session Context:
+  member refresh                  Output current context (Claude can re-read mid-session)
+  member context                  Show what's currently in CLAUDE.md memberberries section
+  member feedback <id> useful     Mark a memory as useful (increases gravity)
+  member feedback <id> not-useful Mark a memory as not useful (decreases gravity)
+
+Active Task:
+  member focus <task_id>          Set active task (highlighted in context)
+  member focus --clear            Clear active task focus
         """
     )
 
@@ -1421,6 +1459,111 @@ fi
                 problem = m.get('problem', m.get('error_message', 'Unknown'))[:60]
                 print(f"  [{mass:.1f}⚫] {problem}")
         print()
+        return
+
+    # Handle refresh command - outputs context for Claude to re-read mid-session
+    if args.task == 'refresh':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        manager = ClaudeMDManager(project_path, storage_mode)
+
+        print("\n" + "="*60)
+        print("📚 MEMBERBERRIES CONTEXT REFRESH")
+        print("="*60)
+        print("(Claude: Re-read the following to update your context)\n")
+
+        # Generate and output fresh context
+        context = manager.generate_memberberries_section(max_tokens=2000)
+        print(context)
+        print("\n" + "="*60)
+        print("End of context refresh")
+        print("="*60)
+        return
+
+    # Handle context command - show current CLAUDE.md memberberries section
+    if args.task == 'context':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        claude_md = project_path / "CLAUDE.md"
+
+        if not claude_md.exists():
+            print("No CLAUDE.md found.")
+            return
+
+        content = claude_md.read_text()
+        delimiter = "<!-- MEMBERBERRIES CONTEXT"
+
+        if delimiter in content:
+            start = content.find(delimiter)
+            print("\n📚 Current Memberberries Context in CLAUDE.md:")
+            print("="*60)
+            print(content[start:])
+        else:
+            print("No memberberries section found in CLAUDE.md")
+        return
+
+    # Handle feedback command - adjust memory gravity based on usefulness
+    if args.task and args.task.startswith('feedback '):
+        parts = args.task.split()
+        if len(parts) < 3:
+            print("Usage: member feedback <memory_id> useful|not-useful")
+            return
+
+        memory_id = parts[1]
+        feedback = parts[2].lower()
+
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        gravity = bm.index.get("memory_gravity", {})
+
+        if memory_id not in gravity:
+            gravity[memory_id] = {"mass": 1, "references": 0, "tasks": [], "last_accessed": datetime.now().isoformat()}
+
+        if feedback in ['useful', 'good', 'helpful', '+']:
+            gravity[memory_id]["mass"] += 2
+            gravity[memory_id]["references"] += 1
+            print(f"✅ Memory {memory_id} marked as useful (+2 gravity)")
+        elif feedback in ['not-useful', 'bad', 'irrelevant', '-']:
+            gravity[memory_id]["mass"] = max(0.1, gravity[memory_id]["mass"] - 1)
+            print(f"⬇️ Memory {memory_id} marked as not useful (-1 gravity)")
+        else:
+            print("Feedback should be 'useful' or 'not-useful'")
+            return
+
+        bm.index["memory_gravity"] = gravity
+        bm._save_index()
+        return
+
+    # Handle focus command - set active task for session
+    if args.task and args.task.startswith('focus'):
+        parts = args.task.split(maxsplit=1)
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        if len(parts) == 1 or parts[1] == '--clear':
+            # Clear focus
+            if "active_task" in bm.index:
+                del bm.index["active_task"]
+                bm._save_index()
+            print("🎯 Active task focus cleared.")
+            return
+
+        task_id = parts[1].strip()
+        clusters = bm.index.get("task_clusters", {})
+
+        if task_id not in clusters:
+            print(f"Task '{task_id}' not found. Use 'member tasks' to see available tasks.")
+            return
+
+        bm.index["active_task"] = task_id
+        bm._save_index()
+
+        cluster = clusters[task_id]
+        print(f"🎯 Active task set: {cluster['name']}")
+        print(f"   ID: {task_id}")
+        print("   This task's memories will be prioritized in context.")
         return
 
     # Determine project path
