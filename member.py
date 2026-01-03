@@ -1467,8 +1467,15 @@ class ClaudeMDManager:
         else:
             # Continuing session: preserve existing active memories
             active_memories = self._parse_active_memories_from_claude_md()
-            if not quiet and active_memories:
-                print(f"🫐 Continuing session - preserved {len(active_memories)} active memories")
+            if active_memories:
+                if not quiet:
+                    print(f"🫐 Continuing session - preserved {len(active_memories)} active memories")
+            else:
+                # No memories to preserve - load from index
+                # This handles the case where CLAUDE.md was cleaned or is empty
+                active_memories = self._get_relevant_memories_for_session(query, limit=12)
+                if not quiet and active_memories:
+                    print(f"🫐 Loaded {len(active_memories)} memories from index")
 
         # Generate new Claude-managed section
         mb_section = self._generate_claude_managed_section(active_memories, query)
