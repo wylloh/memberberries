@@ -23,11 +23,19 @@ import subprocess
 import shutil
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, List, Any
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from berry_manager import BerryManager
+
+# Optional Anthropic SDK for deep scan
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
 
 
 # Delimiters for the memberberries section in CLAUDE.md
@@ -36,6 +44,202 @@ MB_END = "<!-- END MEMBERBERRIES -->"
 
 # Path to memberberries installation
 MEMBERBERRIES_DIR = Path(__file__).parent.resolve()
+
+
+class ConfigManager:
+    """Manage Memberberries configuration including API keys."""
+
+    def __init__(self, storage_path: Path = None):
+        self.storage_path = storage_path or MEMBERBERRIES_DIR / ".memberberries"
+        self.config_file = self.storage_path / "config.json"
+        self._config = None
+
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from file."""
+        if self._config is not None:
+            return self._config
+
+        if self.config_file.exists():
+            try:
+                self._config = json.loads(self.config_file.read_text())
+            except json.JSONDecodeError:
+                self._config = {}
+        else:
+            self._config = {}
+        return self._config
+
+    def _save_config(self) -> None:
+        """Save configuration to file."""
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.config_file.write_text(json.dumps(self._config, indent=2))
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a configuration value."""
+        return self._load_config().get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        """Set a configuration value."""
+        self._load_config()
+        self._config[key] = value
+        self._save_config()
+
+    def get_api_key(self) -> Optional[str]:
+        """Get Anthropic API key from config or environment."""
+        # Check config first, then environment
+        key = self.get("anthropic_api_key")
+        if not key:
+            key = os.environ.get("ANTHROPIC_API_KEY")
+        return key
+
+    def set_api_key(self, key: str) -> None:
+        """Set Anthropic API key in config."""
+        self.set("anthropic_api_key", key)
+
+
+class DeepScan:
+    """AI-powered deep memory scan using Claude Haiku."""
+
+    SYSTEM_PROMPT = """You are a memory relevance analyzer for a coding assistant.
+Your job is to select the most relevant memories for a given task.
+
+You will receive:
+1. A task description
+2. A list of memory summaries with IDs
+
+Return ONLY a JSON array of memory IDs that are relevant to the task.
+Select 5-15 memories maximum. Prioritize:
+- Direct matches to the task topic
+- Related architectural patterns
+- Previous errors/solutions in the same domain
+- User preferences that apply
+
+Example output: ["mem_abc123", "mem_def456", "mem_ghi789"]"""
+
+    def __init__(self, api_key: str, berry_manager: BerryManager):
+        if not ANTHROPIC_AVAILABLE:
+            raise RuntimeError("Anthropic SDK not installed. Run: pip install anthropic")
+        self.client = anthropic.Anthropic(api_key=api_key)
+        self.bm = berry_manager
+
+    def _get_all_memory_summaries(self) -> List[Dict[str, str]]:
+        """Get summaries of all memories for AI analysis."""
+        summaries = []
+
+        # Solutions
+        for m in self.bm.index.get("solutions", []):
+            summaries.append({
+                "id": m.get("id", ""),
+                "type": "solution",
+                "summary": f"Problem: {m.get('problem', '')[:100]} | Solution: {m.get('solution', '')[:100]}",
+                "tags": m.get("tags", [])
+            })
+
+        # Errors
+        for m in self.bm.index.get("errors", []):
+            summaries.append({
+                "id": m.get("id", ""),
+                "type": "error",
+                "summary": f"Error: {m.get('error_message', '')[:100]} | Resolution: {m.get('resolution', '')[:100]}"
+            })
+
+        # Preferences
+        for m in self.bm.index.get("preferences", []):
+            summaries.append({
+                "id": m.get("id", ""),
+                "type": "preference",
+                "summary": f"[{m.get('category', '')}] {m.get('content', '')[:150]}"
+            })
+
+        # Antipatterns
+        for m in self.bm.index.get("antipatterns", []):
+            summaries.append({
+                "id": m.get("id", ""),
+                "type": "antipattern",
+                "summary": f"Don't: {m.get('pattern', '')[:80]} | Instead: {m.get('alternative', '')[:80]}"
+            })
+
+        # Pinned
+        for m in self.bm.get_pinned_memories():
+            summaries.append({
+                "id": m.get("id", ""),
+                "type": "pinned",
+                "summary": f"[{m.get('category', '')}] {m.get('name', '')}: {m.get('content', '')[:100]}"
+            })
+
+        return summaries
+
+    def _get_memory_by_id(self, memory_id: str) -> Optional[Dict]:
+        """Retrieve full memory content by ID."""
+        for mem_type in ["solutions", "errors", "preferences", "antipatterns"]:
+            for m in self.bm.index.get(mem_type, []):
+                if m.get("id", "").startswith(memory_id) or memory_id in m.get("id", ""):
+                    return {"type": mem_type, "data": m}
+
+        for m in self.bm.get_pinned_memories():
+            if m.get("id", "").startswith(memory_id) or memory_id in m.get("id", ""):
+                return {"type": "pinned", "data": m}
+
+        return None
+
+    def scan(self, task: str, memory_types: List[str] = None) -> List[Dict]:
+        """Perform deep scan and return relevant memories.
+
+        Args:
+            task: Task description to find relevant context for
+            memory_types: Optional filter for memory types
+
+        Returns:
+            List of full memory objects deemed relevant
+        """
+        summaries = self._get_all_memory_summaries()
+
+        if memory_types:
+            summaries = [s for s in summaries if s["type"] in memory_types]
+
+        if not summaries:
+            return []
+
+        # Format summaries for AI
+        summary_text = "\n".join([
+            f"[{s['id'][:8]}] ({s['type']}) {s['summary']}"
+            for s in summaries
+        ])
+
+        # Call Haiku for relevance analysis
+        try:
+            response = self.client.messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=500,
+                system=self.SYSTEM_PROMPT,
+                messages=[{
+                    "role": "user",
+                    "content": f"Task: {task}\n\nMemories:\n{summary_text}"
+                }]
+            )
+
+            # Parse response
+            content = response.content[0].text.strip()
+            # Extract JSON array from response
+            if "[" in content and "]" in content:
+                start = content.find("[")
+                end = content.rfind("]") + 1
+                memory_ids = json.loads(content[start:end])
+            else:
+                memory_ids = []
+
+        except Exception as e:
+            print(f"Deep scan error: {e}")
+            return []
+
+        # Fetch full memories
+        relevant_memories = []
+        for mid in memory_ids:
+            # Handle both full and partial IDs
+            mem = self._get_memory_by_id(mid)
+            if mem:
+                relevant_memories.append(mem)
+
+        return relevant_memories
 
 
 class ProjectDetector:
@@ -803,6 +1007,70 @@ class ClaudeMDManager:
 
         return "\n".join(sections)
 
+    def _generate_deep_context(self, memories: List[Dict], task: str) -> str:
+        """Generate context section from AI-selected memories.
+
+        Args:
+            memories: List of memory dicts from DeepScan
+            task: Task description for context header
+
+        Returns:
+            Formatted context section for CLAUDE.md
+        """
+        lines = [
+            f"\n*Deep scan: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+            f"*Task: {task[:80]}*",
+            ""
+        ]
+
+        # Group by type
+        solutions = [m for m in memories if m["type"] == "solution"]
+        errors = [m for m in memories if m["type"] == "error"]
+        preferences = [m for m in memories if m["type"] == "preference"]
+        pinned = [m for m in memories if m["type"] == "pinned"]
+        antipatterns = [m for m in memories if m["type"] == "antipattern"]
+
+        if pinned:
+            lines.append("## 📌 Pinned Context")
+            for m in pinned:
+                data = m["data"]
+                lines.append(f"- **{data.get('name', 'Pinned')}**: {data.get('content', '')}")
+            lines.append("")
+
+        if preferences:
+            lines.append("## ⚙️ Relevant Preferences")
+            for m in preferences:
+                data = m["data"]
+                lines.append(f"- **{data.get('category', '')}**: {data.get('content', '')}")
+            lines.append("")
+
+        if solutions:
+            lines.append("## 💡 Relevant Solutions")
+            for m in solutions:
+                data = m["data"]
+                mem_id = data.get("id", "")[:8]
+                lines.append(f"- `{mem_id}` **{data.get('problem', '')}**: {data.get('solution', '')}")
+            lines.append("")
+
+        if errors:
+            lines.append("## ⚠️ Related Errors")
+            for m in errors:
+                data = m["data"]
+                mem_id = data.get("id", "")[:8]
+                lines.append(f"- `{mem_id}` **{data.get('error_message', '')}**")
+                lines.append(f"  - Resolution: {data.get('resolution', '')}")
+            lines.append("")
+
+        if antipatterns:
+            lines.append("## 🚫 Antipatterns to Avoid")
+            for m in antipatterns:
+                data = m["data"]
+                lines.append(f"- **Don't**: {data.get('pattern', '')}")
+                lines.append(f"  - Instead: {data.get('alternative', '')}")
+            lines.append("")
+
+        return "\n".join(lines)
+
     def sync_claude_md(self, query: str = None, quiet: bool = False) -> bool:
         """Sync CLAUDE.md with fresh memberberries context.
 
@@ -837,6 +1105,35 @@ class ClaudeMDManager:
 
         if not quiet and not created:
             print(f"Synced memberberries to {self.claude_md_path}")
+
+        return True
+
+    def update_claude_md(self, mb_section: str) -> bool:
+        """Update CLAUDE.md with specific memberberries content.
+
+        Args:
+            mb_section: Pre-formatted memberberries section content
+
+        Returns:
+            True if update was successful
+        """
+        # Ensure file exists
+        self.ensure_claude_md_exists()
+
+        # Read existing content
+        user_content, _ = self.read_claude_md()
+
+        # Combine and write
+        separator = "" if user_content.rstrip().endswith("---") else "\n\n---"
+        new_content = f"""{user_content}{separator}
+
+{MB_START}
+{mb_section}
+{MB_END}
+"""
+
+        with open(self.claude_md_path, 'w') as f:
+            f.write(new_content)
 
         return True
 
@@ -1749,6 +2046,136 @@ fi
         context = manager.generate_memberberries_section(max_tokens=10000)
         print(context)
         print("\n" + "="*60)
+        return
+
+    # Handle config command - manage Memberberries configuration
+    if args.task and args.task.startswith('config'):
+        parts = args.task.split(maxsplit=2)
+        config = ConfigManager()
+
+        if len(parts) == 1:
+            # Show current config (redacted)
+            print("\n⚙️  MEMBERBERRIES CONFIGURATION")
+            print("="*60)
+            api_key = config.get_api_key()
+            if api_key:
+                print(f"Anthropic API Key: {api_key[:8]}...{api_key[-4:]}")
+            else:
+                print("Anthropic API Key: Not configured")
+                print("\nTo enable 'member deep', set your API key:")
+                print("  member config api-key sk-ant-...")
+            print()
+            return
+
+        if parts[1] == 'api-key':
+            if len(parts) < 3:
+                print("Usage: member config api-key <your-api-key>")
+                return
+            key = parts[2].strip()
+            if not key.startswith('sk-'):
+                print("Warning: API key should start with 'sk-'")
+            config.set_api_key(key)
+            print(f"✅ API key saved: {key[:8]}...{key[-4:]}")
+            print("You can now use 'member deep' for AI-powered context retrieval.")
+            return
+
+        print(f"Unknown config option: {parts[1]}")
+        print("Available options: api-key")
+        return
+
+    # Handle deep command - AI-powered context retrieval
+    if args.task and args.task.startswith('deep '):
+        task_description = args.task[5:].strip()
+
+        if not task_description:
+            print("Usage: member deep \"your task description\"")
+            print("\nExamples:")
+            print("  member deep \"implement OAuth authentication\"")
+            print("  member deep \"fix the database connection timeout\"")
+            print("  member deep \"refactor the payment module\" --focus")
+            return
+
+        # Check for flags
+        set_focus = '--focus' in task_description
+        types_filter = None
+        if '--types' in task_description:
+            # Parse --types errors,solutions
+            import re
+            match = re.search(r'--types\s+([\w,]+)', task_description)
+            if match:
+                types_filter = match.group(1).split(',')
+                task_description = re.sub(r'--types\s+[\w,]+', '', task_description)
+
+        task_description = task_description.replace('--focus', '').strip()
+
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        config = ConfigManager()
+        api_key = config.get_api_key()
+
+        if not api_key:
+            print("❌ Deep scan requires an Anthropic API key.")
+            print("\nTo configure:")
+            print("  member config api-key sk-ant-...")
+            print("\nOr set ANTHROPIC_API_KEY environment variable.")
+            return
+
+        if not ANTHROPIC_AVAILABLE:
+            print("❌ Anthropic SDK not installed.")
+            print("Run: pip install anthropic")
+            return
+
+        print(f"\n🔍 Deep scanning memories for: \"{task_description}\"")
+        print("-"*60)
+
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+        scanner = DeepScan(api_key, bm)
+
+        try:
+            relevant = scanner.scan(task_description, memory_types=types_filter)
+        except Exception as e:
+            print(f"❌ Deep scan failed: {e}")
+            return
+
+        if not relevant:
+            print("No highly relevant memories found for this task.")
+            return
+
+        print(f"✅ Found {len(relevant)} relevant memories:\n")
+
+        # Display and optionally update CLAUDE.md
+        manager = ClaudeMDManager(project_path, storage_mode)
+
+        for mem in relevant:
+            mem_type = mem["type"]
+            data = mem["data"]
+            mem_id = data.get("id", "")[:8]
+
+            if mem_type == "solution":
+                print(f"  [{mem_id}] 💡 {data.get('problem', '')[:60]}")
+            elif mem_type == "error":
+                print(f"  [{mem_id}] ⚠️  {data.get('error_message', '')[:60]}")
+            elif mem_type == "preference":
+                print(f"  [{mem_id}] ⚙️  [{data.get('category', '')}] {data.get('content', '')[:50]}")
+            elif mem_type == "pinned":
+                print(f"  [{mem_id}] 📌 {data.get('name', '')}")
+            elif mem_type == "antipattern":
+                print(f"  [{mem_id}] 🚫 {data.get('pattern', '')[:60]}")
+
+        print()
+
+        # Update CLAUDE.md with deep context
+        deep_context = manager._generate_deep_context(relevant, task_description)
+        manager.update_claude_md(deep_context)
+
+        print(f"📝 CLAUDE.md updated with task-specific context.")
+
+        if set_focus:
+            # Create or update task cluster
+            bm.create_task_cluster(task_description[:50], task_description)
+            print(f"🎯 Task focus set: {task_description[:50]}")
+
+        print("\nRun 'claude' to start your session with optimized context.")
         return
 
     # Handle focus command - set active task for session
