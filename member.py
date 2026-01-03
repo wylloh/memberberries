@@ -19,6 +19,7 @@ import os
 import sys
 import re
 import json
+import random
 import argparse
 import subprocess
 import shutil
@@ -611,45 +612,127 @@ class ClaudeMDManager:
         """Get relevant memories from index for new session start.
 
         Uses semantic search to find the most relevant memories for the current
-        query/project context.
+        query/project context, plus a serendipity slot for unexpected insights.
+
+        Memory retrieval philosophy:
+        - 95% relevance-based (pinned, high-gravity, task, semantic)
+        - 5% serendipity (random deep memory that might spark unexpected insights)
+
+        This emulates human memory, where sometimes a random old observation
+        unlocks progress on a current problem.
         """
         memories = []
+        existing_ids = set()
         search_query = query or "general development context"
+
+        def add_memory(mem, priority):
+            """Helper to add memory if not duplicate."""
+            mem_id = mem.get('id')
+            if mem_id and mem_id not in existing_ids:
+                mem['priority'] = priority
+                memories.append(mem)
+                existing_ids.add(mem_id)
+                return True
+            return False
 
         # Get pinned memories first (always included)
         pinned = self.bm.get_pinned_memories()
         for mem in pinned[:3]:
-            mem['priority'] = 'pinned'
-            memories.append(mem)
+            add_memory(mem, 'pinned')
 
         # Get high-gravity memories
         high_gravity = self.bm.get_high_gravity_memories(top_k=3)
         for mem in high_gravity:
-            if mem.get('id') not in [m.get('id') for m in memories]:
-                mem['priority'] = 'high_gravity'
-                memories.append(mem)
+            add_memory(mem, 'high_gravity')
 
         # Get active task memories if set
         active_task_id = self.bm.index.get("active_task")
         if active_task_id:
             task_memories = self.bm.get_task_memories(active_task_id, include_subtasks=True)
             for mem in task_memories[:3]:
-                if mem.get('id') not in [m.get('id') for m in memories]:
-                    mem['priority'] = 'active_task'
-                    memories.append(mem)
+                add_memory(mem, 'active_task')
+
+        # Reserve 1 slot for serendipity (random deep memory)
+        # This is the "5% magic" - a random memory that might spark insight
+        serendipity_added = False
+        if len(memories) < limit - 1:  # Leave room for at least 1 relevant + 1 serendipity
+            serendipity_mem = self._get_serendipity_memory(existing_ids)
+            if serendipity_mem:
+                add_memory(serendipity_mem, 'serendipity')
+                serendipity_added = True
 
         # Fill remaining slots with semantically relevant memories
         remaining = limit - len(memories)
         if remaining > 0:
-            solutions = self.bm.search_solutions(search_query, top_k=remaining)
+            solutions = self.bm.search_solutions(search_query, top_k=remaining + 5)  # Get extras to filter
             for mem in solutions:
-                if mem.get('id') not in [m.get('id') for m in memories]:
-                    mem['priority'] = 'relevant'
-                    memories.append(mem)
-                if len(memories) >= limit:
-                    break
+                if add_memory(mem, 'relevant'):
+                    if len(memories) >= limit:
+                        break
 
         return memories[:limit]
+
+    def _get_serendipity_memory(self, exclude_ids: set) -> Optional[Dict]:
+        """Get a random 'deep' memory for serendipitous recall.
+
+        Selects from older, lower-gravity memories that might not normally
+        surface but could spark unexpected insights. This emulates how human
+        memory sometimes surfaces old observations that unlock current problems.
+
+        Args:
+            exclude_ids: Set of memory IDs already in the session
+
+        Returns:
+            A random memory dict, or None if no candidates
+        """
+        candidates = []
+
+        # Collect all non-archived memories from all types
+        memory_types = ['solutions', 'errors', 'antipatterns', 'preferences',
+                        'git_conventions', 'dependencies', 'testing', 'api_notes']
+
+        for mem_type in memory_types:
+            for mem in self.bm.index.get(mem_type, []):
+                mem_id = mem.get('id')
+                # Skip if already included, archived, or pinned
+                if (mem_id in exclude_ids or
+                    mem.get('archived') or
+                    mem.get('pinned')):
+                    continue
+
+                # Prefer older memories (more likely to be "forgotten")
+                # and lower gravity (not frequently accessed)
+                gravity = mem.get('gravitational_mass', 1.0)
+                if gravity < 2.0:  # Not high-gravity
+                    candidates.append(mem)
+
+        if not candidates:
+            return None
+
+        # Weight selection toward older memories
+        # Older = more "forgotten" = more serendipitous when recalled
+        def age_weight(mem):
+            try:
+                ts = datetime.fromisoformat(mem.get('timestamp', ''))
+                age_days = (datetime.now() - ts).days
+                return max(1, age_days)  # Older = higher weight
+            except:
+                return 1
+
+        weights = [age_weight(m) for m in candidates]
+        total = sum(weights)
+        if total == 0:
+            return random.choice(candidates)
+
+        # Weighted random selection
+        r = random.uniform(0, total)
+        cumulative = 0
+        for mem, weight in zip(candidates, weights):
+            cumulative += weight
+            if r <= cumulative:
+                return mem
+
+        return candidates[-1] if candidates else None
 
     def _generate_claude_managed_section(self, active_memories: List[Dict], query: str = None) -> str:
         """Generate Claude-managed memory section.

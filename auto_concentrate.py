@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 
 from berry_manager import BerryManager
+from member import MemberberriesManager
 
 
 class MemoryExtractor:
@@ -431,6 +432,24 @@ class MemoryExtractor:
             'END MEMBERBERRIES', 'How to use this context:',
             'Pinned = Protected info', 'High Gravity = Frequently',
             'Active Task = Current focus', 'Memories ranked by importance',
+
+            # System reminder content (should never be extracted)
+            '<system-reminder>', '</system-reminder>',
+            'persisted-output', 'function_results',
+            'system-reminder>',
+            'analyze existing code, write reports',
+            'MUST refuse to improve or augment',
+            'should consider whether it would be considered malware',
+
+            # Memberberries' own template/placeholder text
+            'User need:', 'Repeated issue:', 'General solution',
+            '(Captured from conversation', '(Auto-captured',
+            '(Claude-authored memory)', '(pending resolution)',
+            'pending resolution)',
+
+            # Tool/internal markers
+            'antml:invoke', 'antml:parameter',
+            '<function_results>', '</function_results>',
 
             # Malformed JSON/data fragments
             '}}], ', "[{'", "'}]", '}], ', "': [{'",
@@ -1295,12 +1314,26 @@ def main():
             with open(args.transcript, 'r') as f:
                 text = f.read()
             memories = extractor.extract_all(text)
+            print(f"Extracted {len(memories)} memories:")
+            for m in memories:
+                print(f"  - [{m['type']}] {list(m.values())[1][:50]}...")
         else:
-            memories = concentrator.process_transcript(args.transcript)
+            # DEPRECATED: Legacy pattern extraction - disabled to prevent garbage
+            # The aggressive regex patterns were extracting system reminders,
+            # template text, and other noise. Now using Claude-managed architecture only.
+            # memories = concentrator.process_transcript(args.transcript)
 
-        print(f"Extracted {len(memories)} memories:")
-        for m in memories:
-            print(f"  - [{m['type']}] {list(m.values())[1][:50]}...")
+            # Process explicit [MEMORY] and [ARCHIVE] markers from Claude's responses
+            marker_results = concentrator.process_memory_markers(args.transcript)
+
+            # Sync CLAUDE.md to reflect changes (new memories and archives)
+            # This keeps working memory current within the session
+            if marker_results['memories'] > 0 or marker_results['archives'] > 0:
+                try:
+                    manager = MemberberriesManager(project_path=args.project)
+                    manager.sync_claude_md(quiet=True)
+                except Exception:
+                    pass  # Don't fail the hook if sync fails
 
     elif args.text:
         if args.dry_run:
