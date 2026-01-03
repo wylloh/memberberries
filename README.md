@@ -175,7 +175,7 @@ Solution: Use slowapi with Redis backend...
 
 ### Copy → Paste into Claude Code → Enhanced Context!
 
-Claude Code now memberberries:
+Claude Code now members:
 - Your coding style and preferences
 - Your project's architecture
 - Solutions to similar problems you've solved
@@ -197,7 +197,7 @@ Claude Code now memberberries:
 - [**Vector DB Upgrade**](VECTOR_DB_UPGRADE.md) - Scaling to 10,000+ memories
 - [**Contributing Guide**](CONTRIBUTING.md) - How to contribute
 
-## 💡 Example Workflows
+## Example Workflows
 
 ### Daily Coding Workflow
 
