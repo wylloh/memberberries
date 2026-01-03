@@ -1153,6 +1153,127 @@ class AutoConcentrator:
 
         return stored
 
+    def _parse_memory_markers(self, text: str) -> List[Dict]:
+        """Parse [MEMORY #tag1 #tag2] summary patterns from Claude's responses.
+
+        This is part of the new Claude-managed memory architecture where Claude
+        writes its own memories using explicit markers.
+
+        Args:
+            text: Text to parse (typically Claude's response)
+
+        Returns:
+            List of memory dicts ready to be stored
+        """
+        pattern = r'\[MEMORY\s+((?:#\w+\s*)+)\]\s*(.+?)(?:\n|$)'
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+
+        memories = []
+        for match in matches:
+            tags_str = match.group(1)
+            summary = match.group(2).strip()
+
+            # Parse tags from the #tag format
+            tags = re.findall(r'#(\w+)', tags_str)
+
+            # Skip if empty summary
+            if not summary:
+                continue
+
+            memories.append({
+                'type': 'claude_memory',
+                'problem': summary,
+                'solution': '(Claude-authored memory)',
+                'tags': tags,
+                'timestamp': datetime.now().isoformat(),
+                'claude_authored': True
+            })
+
+        return memories
+
+    def _parse_archive_markers(self, text: str) -> List[str]:
+        """Parse [ARCHIVE id] patterns from Claude's responses.
+
+        When Claude decides a memory is no longer relevant, it can archive it
+        using this marker.
+
+        Args:
+            text: Text to parse (typically Claude's response)
+
+        Returns:
+            List of memory IDs to archive
+        """
+        pattern = r'\[ARCHIVE\s+([a-f0-9]{8})\]'
+        return re.findall(pattern, text, re.IGNORECASE)
+
+    def process_memory_markers(self, transcript_path: str) -> Dict[str, int]:
+        """Process Claude's memory markers from a transcript.
+
+        This is the main entry point for the new Claude-managed memory architecture.
+
+        Args:
+            transcript_path: Path to the .jsonl transcript file
+
+        Returns:
+            Dict with counts of processed markers
+        """
+        transcript_path = Path(transcript_path)
+        if not transcript_path.exists():
+            return {'memories': 0, 'archives': 0}
+
+        # Read the transcript (JSONL format)
+        messages = []
+        try:
+            with open(transcript_path, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        messages.append(json.loads(line))
+        except Exception:
+            return {'memories': 0, 'archives': 0}
+
+        # Extract assistant responses
+        assistant_texts = []
+        for msg in messages:
+            if isinstance(msg, dict) and msg.get('role') == 'assistant':
+                content = msg.get('content', '')
+                if isinstance(content, str):
+                    assistant_texts.append(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and 'text' in item:
+                            assistant_texts.append(item['text'])
+
+        full_text = "\n\n".join(assistant_texts)
+
+        # Parse memory markers
+        new_memories = self._parse_memory_markers(full_text)
+        stored_count = 0
+        for mem in new_memories:
+            result = self.bm.add_solution(
+                problem=mem['problem'],
+                solution=mem['solution'],
+                tags=mem.get('tags', []) + ['claude-authored'],
+                code_snippet=None
+            )
+            if result:
+                stored_count += 1
+                # Auto-cluster based on tags
+                if result.get('id'):
+                    self.bm.auto_cluster_memory(
+                        result['id'],
+                        mem.get('tags', []),
+                        mem['problem']
+                    )
+
+        # Parse archive markers
+        archive_ids = self._parse_archive_markers(full_text)
+        archived_count = 0
+        for mem_id in archive_ids:
+            if self.bm.archive_memory(mem_id):
+                archived_count += 1
+
+        return {'memories': stored_count, 'archives': archived_count}
+
 
 def main():
     """CLI for testing auto-concentrate."""

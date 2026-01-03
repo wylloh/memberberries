@@ -17,6 +17,7 @@ Usage:
 
 import os
 import sys
+import re
 import json
 import argparse
 import subprocess
@@ -522,12 +523,211 @@ class InteractiveSetup:
 
 
 class ClaudeMDManager:
-    """Manages the CLAUDE.md file with memberberries integration."""
+    """Manages the CLAUDE.md file with memberberries integration.
+
+    Now supports Claude-managed memory architecture where Claude writes
+    its own memories using [MEMORY #tags] markers.
+    """
+
+    # Session detection threshold (minutes)
+    SESSION_TIMEOUT_MINUTES = 30
+
+    # Maximum active memories in CLAUDE.md
+    MAX_ACTIVE_MEMORIES = 15
 
     def __init__(self, project_path: Path, storage_mode: str = 'auto'):
         self.project_path = Path(project_path)
         self.claude_md_path = self.project_path / "CLAUDE.md"
         self.bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+    def _is_new_session(self) -> bool:
+        """Detect if this is a new session based on time gap.
+
+        Returns True if:
+        - CLAUDE.md doesn't exist
+        - No last sync timestamp found
+        - Time since last sync > SESSION_TIMEOUT_MINUTES
+        """
+        last_sync = self._get_last_sync_time()
+        if last_sync is None:
+            return True
+        gap = datetime.now() - last_sync
+        return gap.total_seconds() > (self.SESSION_TIMEOUT_MINUTES * 60)
+
+    def _get_last_sync_time(self) -> Optional[datetime]:
+        """Get last sync timestamp from CLAUDE.md."""
+        if not self.claude_md_path.exists():
+            return None
+
+        try:
+            content = self.claude_md_path.read_text()
+            # Parse: *Last sync: 2026-01-03 12:15*
+            match = re.search(r'\*Last sync: (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\*', content)
+            if match:
+                return datetime.strptime(match.group(1), '%Y-%m-%d %H:%M')
+        except:
+            pass
+        return None
+
+    def _parse_active_memories_from_claude_md(self) -> List[Dict]:
+        """Parse active memories from existing CLAUDE.md.
+
+        Preserves memories Claude has been working with during the session.
+        """
+        if not self.claude_md_path.exists():
+            return []
+
+        try:
+            content = self.claude_md_path.read_text()
+
+            # Find the Active Memories section
+            memories = []
+            # Pattern: - `id` [timestamp] #tags: summary
+            pattern = r'- `([a-f0-9]{8})` \[([^\]]+)\] ([^:]+): (.+?)(?:\n|$)'
+            matches = re.finditer(pattern, content)
+
+            for match in matches:
+                mem_id = match.group(1)
+                timestamp = match.group(2)
+                tags_str = match.group(3)
+                summary = match.group(4).strip()
+
+                # Parse tags
+                tags = re.findall(r'#(\w+)', tags_str)
+
+                memories.append({
+                    'id': mem_id,
+                    'timestamp': timestamp,
+                    'tags': tags,
+                    'problem': summary,
+                    'parsed_from_claude_md': True
+                })
+
+            return memories
+        except:
+            return []
+
+    def _get_relevant_memories_for_session(self, query: str = None, limit: int = 12) -> List[Dict]:
+        """Get relevant memories from index for new session start.
+
+        Uses semantic search to find the most relevant memories for the current
+        query/project context.
+        """
+        memories = []
+        search_query = query or "general development context"
+
+        # Get pinned memories first (always included)
+        pinned = self.bm.get_pinned_memories()
+        for mem in pinned[:3]:
+            mem['priority'] = 'pinned'
+            memories.append(mem)
+
+        # Get high-gravity memories
+        high_gravity = self.bm.get_high_gravity_memories(top_k=3)
+        for mem in high_gravity:
+            if mem.get('id') not in [m.get('id') for m in memories]:
+                mem['priority'] = 'high_gravity'
+                memories.append(mem)
+
+        # Get active task memories if set
+        active_task_id = self.bm.index.get("active_task")
+        if active_task_id:
+            task_memories = self.bm.get_task_memories(active_task_id, include_subtasks=True)
+            for mem in task_memories[:3]:
+                if mem.get('id') not in [m.get('id') for m in memories]:
+                    mem['priority'] = 'active_task'
+                    memories.append(mem)
+
+        # Fill remaining slots with semantically relevant memories
+        remaining = limit - len(memories)
+        if remaining > 0:
+            solutions = self.bm.search_solutions(search_query, top_k=remaining)
+            for mem in solutions:
+                if mem.get('id') not in [m.get('id') for m in memories]:
+                    mem['priority'] = 'relevant'
+                    memories.append(mem)
+                if len(memories) >= limit:
+                    break
+
+        return memories[:limit]
+
+    def _generate_claude_managed_section(self, active_memories: List[Dict], query: str = None) -> str:
+        """Generate Claude-managed memory section.
+
+        This is the new architecture where Claude writes its own memories using
+        [MEMORY #tags] markers and archives drifting memories with [ARCHIVE id].
+        """
+        lines = [
+            "",
+            "## Memory Instructions",
+            "After significant work, write: `[MEMORY #tag1 #tag2] one-line summary`",
+            "To archive a drifting memory: `[ARCHIVE id]`",
+            "",
+            "## Active Memories",
+        ]
+
+        # Add active memories (up to MAX_ACTIVE_MEMORIES)
+        if active_memories:
+            for mem in active_memories[:self.MAX_ACTIVE_MEMORIES]:
+                mem_id = mem.get('id', '')[:8] if mem.get('id') else '????????'
+                timestamp = mem.get('timestamp', '')[:16] if mem.get('timestamp') else datetime.now().strftime('%Y-%m-%d %H:%M')
+                tags = ' '.join(f"#{t}" for t in mem.get('tags', [])) if mem.get('tags') else '#general'
+                # Get summary from various possible fields
+                summary = (
+                    mem.get('problem') or
+                    mem.get('summary') or
+                    mem.get('content') or
+                    mem.get('name', 'Memory')
+                )
+                # Truncate long summaries
+                if len(summary) > 100:
+                    summary = summary[:97] + "..."
+                # Clean up summary (remove newlines, etc.)
+                summary = summary.replace('\n', ' ').strip()
+
+                # Add priority indicator if present
+                priority = mem.get('priority', '')
+                prefix = ''
+                if priority == 'pinned':
+                    prefix = '📌 '
+                elif priority == 'high_gravity':
+                    prefix = '⚫ '
+                elif priority == 'active_task':
+                    prefix = '🎯 '
+
+                lines.append(f"- `{mem_id}` [{timestamp}] {tags}: {prefix}{summary}")
+        else:
+            lines.append("*(No memories yet - they'll appear as you work)*")
+
+        # Add active task context if set
+        active_task_id = self.bm.index.get("active_task")
+        if active_task_id:
+            clusters = self.bm.index.get("task_clusters", {})
+            if active_task_id in clusters:
+                task = clusters[active_task_id]
+                lines.extend([
+                    "",
+                    f"## Active Task: {task['name']}",
+                ])
+                if task.get('description'):
+                    lines.append(f"*{task['description']}*")
+
+        lines.extend([
+            "",
+            "## Session Context",
+            f"*Last sync: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        ])
+
+        if query:
+            display_query = query[:80] + "..." if len(query) > 80 else query
+            lines.append(f"*Current focus: {display_query}*")
+
+        lines.extend([
+            "",
+            "<!-- END MEMBERBERRIES -->"
+        ])
+
+        return "\n".join(lines)
 
     def ensure_claude_md_exists(self, interactive: bool = False) -> bool:
         """Create CLAUDE.md if it doesn't exist.
@@ -1126,6 +1326,10 @@ class ClaudeMDManager:
     def sync_claude_md(self, query: str = None, quiet: bool = False) -> bool:
         """Sync CLAUDE.md with fresh memberberries context.
 
+        Uses Claude-managed memory architecture:
+        - New session (>30 min gap): scrape index for relevant memories
+        - Continuing session: preserve active memories from CLAUDE.md
+
         Args:
             query: Query to focus context (task or prompt)
             quiet: If True, suppress output (for hook mode)
@@ -1139,8 +1343,22 @@ class ClaudeMDManager:
         # Read existing content
         user_content, _ = self.read_claude_md()
 
-        # Generate new memberberries section
-        mb_section = self.generate_memberberries_section(query)
+        # Detect if this is a new session
+        is_new_session = self._is_new_session()
+
+        if is_new_session:
+            # New session: scrape index for relevant memories
+            active_memories = self._get_relevant_memories_for_session(query, limit=12)
+            if not quiet:
+                print(f"🫐 New session - loaded {len(active_memories)} relevant memories")
+        else:
+            # Continuing session: preserve existing active memories
+            active_memories = self._parse_active_memories_from_claude_md()
+            if not quiet and active_memories:
+                print(f"🫐 Continuing session - preserved {len(active_memories)} active memories")
+
+        # Generate new Claude-managed section
+        mb_section = self._generate_claude_managed_section(active_memories, query)
 
         # Combine and write
         # Only add separator if user content doesn't already end with one
@@ -1149,7 +1367,6 @@ class ClaudeMDManager:
 
 {MB_START}
 {mb_section}
-{MB_END}
 """
 
         with open(self.claude_md_path, 'w') as f:
@@ -2362,7 +2579,6 @@ fi
         types_filter = None
         if '--types' in task_description:
             # Parse --types errors,solutions
-            import re
             match = re.search(r'--types\s+([\w,]+)', task_description)
             if match:
                 types_filter = match.group(1).split(',')

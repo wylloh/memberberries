@@ -558,19 +558,22 @@ class BerryManager:
     
     def search_solutions(self, query: str, top_k: int = 3) -> List[Dict]:
         """Search for relevant solutions using semantic similarity.
-        
+
         Args:
             query: The problem or query to search for
             top_k: Number of top results to return
         """
         query_embedding = self._simple_embedding(query)
         scored_solutions = []
-        
+
         for solution in self.index["solutions"]:
+            # Skip archived memories
+            if solution.get('archived'):
+                continue
             solution_embedding = np.array(solution["embedding"])
             similarity = self._cosine_similarity(query_embedding, solution_embedding)
             scored_solutions.append((similarity, solution))
-        
+
         # Sort by similarity
         scored_solutions.sort(reverse=True, key=lambda x: x[0])
         return [sol for _, sol in scored_solutions[:top_k]]
@@ -654,6 +657,90 @@ class BerryManager:
                     })
 
         return low_quality
+
+    def archive_memory(self, memory_id: str) -> bool:
+        """Archive a memory, moving it from active to archived state.
+
+        This is used when Claude decides a memory is no longer relevant
+        for the current session. Archived memories are still stored but
+        not included in active memory lists.
+
+        Args:
+            memory_id: The ID (or 8-char prefix) of the memory to archive
+
+        Returns:
+            True if memory was found and archived, False otherwise
+        """
+        # Search all memory types for the ID
+        memory_types = ['solutions', 'errors', 'antipatterns', 'preferences',
+                        'git_conventions', 'dependencies', 'testing', 'env_configs', 'api_notes']
+
+        for mem_type in memory_types:
+            memories = self.index.get(mem_type, [])
+            for mem in memories:
+                if mem.get('id', '').startswith(memory_id):
+                    # Mark as archived
+                    mem['archived'] = True
+                    mem['archived_at'] = datetime.now().isoformat()
+
+                    # Reduce gravitational mass (less likely to resurface)
+                    current_mass = mem.get('gravitational_mass', 1.0)
+                    mem['gravitational_mass'] = max(0.1, current_mass * 0.5)
+
+                    self._save_index()
+                    return True
+
+        return False
+
+    def get_archived_memories(self, limit: int = 20) -> List[Dict]:
+        """Get recently archived memories.
+
+        Args:
+            limit: Maximum number of memories to return
+
+        Returns:
+            List of archived memory dicts, sorted by archive time
+        """
+        archived = []
+
+        for mem_type in ['solutions', 'errors', 'antipatterns']:
+            for mem in self.index.get(mem_type, []):
+                if mem.get('archived'):
+                    archived.append({
+                        **mem,
+                        'memory_type': mem_type
+                    })
+
+        # Sort by archive time, most recent first
+        archived.sort(key=lambda x: x.get('archived_at', ''), reverse=True)
+
+        return archived[:limit]
+
+    def unarchive_memory(self, memory_id: str) -> bool:
+        """Restore an archived memory to active status.
+
+        Args:
+            memory_id: The ID (or 8-char prefix) of the memory to unarchive
+
+        Returns:
+            True if memory was found and unarchived, False otherwise
+        """
+        memory_types = ['solutions', 'errors', 'antipatterns', 'preferences',
+                        'git_conventions', 'dependencies', 'testing', 'env_configs', 'api_notes']
+
+        for mem_type in memory_types:
+            memories = self.index.get(mem_type, [])
+            for mem in memories:
+                if mem.get('id', '').startswith(memory_id) and mem.get('archived'):
+                    mem['archived'] = False
+                    mem.pop('archived_at', None)
+                    # Restore some gravitational mass
+                    mem['gravitational_mass'] = mem.get('gravitational_mass', 0.5) * 2
+
+                    self._save_index()
+                    return True
+
+        return False
 
     # SESSION MANAGEMENT
     
@@ -1485,15 +1572,18 @@ class BerryManager:
             gravity.items(),
             key=lambda x: x[1].get("mass", 0),
             reverse=True
-        )[:top_k]
+        )
 
         memories = []
         for mid, gdata in sorted_gravity:
             mem = self._find_memory_by_id(mid)
-            if mem:
+            # Skip archived memories
+            if mem and not mem.get('archived'):
                 mem["_gravity_mass"] = gdata.get("mass", 1)
                 mem["_references"] = gdata.get("references", 0)
                 memories.append(mem)
+            if len(memories) >= top_k:
+                break
 
         return memories
 

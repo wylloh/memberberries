@@ -195,6 +195,24 @@ python memberberries.py concentrate-error \
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Claude-Managed Memories (v2.0)
+
+In v2.0, Claude becomes the author of its own memories. Instead of regex-based extraction, Claude explicitly writes memories using simple markers:
+
+```markdown
+[MEMORY #python #testing] Always use pytest fixtures for database tests
+[MEMORY #architecture #api] Use FastAPI with async endpoints for performance
+[ARCHIVE a1b2c3d4]
+```
+
+**How it works:**
+- **Session start** (>30 min gap): Memberberries loads 10-15 relevant memories from your index
+- **During session**: Claude can write new memories with `[MEMORY #tags] summary`
+- **Curating context**: Claude can archive drifting memories with `[ARCHIVE id]`
+- **Session end**: New memories are stored, archived ones are demoted
+
+This produces higher-quality, intentional memories rather than noisy extraction.
+
 ### Interactive Project Setup
 
 When you run `member init` or `member setup`, the wizard helps you create CLAUDE.md:
@@ -420,7 +438,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - ✅ Apple Silicon (arm64) native support
 - ✅ Staleness decay for aging memories
 
-### v1.3 (Current)
+### v1.3
 - ✅ `member update` - Self-update from git + regenerate hooks
 - ✅ `member clean` - Remove low-quality/duplicate memories
 - ✅ `member report` - Generate bug reports with system context
@@ -428,15 +446,23 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - ✅ Self-reflection refinement system (Claude can improve memories)
 - ✅ Enhanced garbage filtering (API fragments, template text, stack traces)
 - ✅ Improved error+resolution extraction patterns
+
+### v2.0 (Current) - Claude-Managed Memory Architecture
+- ✅ **Claude writes its own memories** using `[MEMORY #tags] summary` markers
+- ✅ **Claude archives memories** using `[ARCHIVE id]` markers
+- ✅ **Session detection** - New session (>30 min gap) vs continuing session
+- ✅ **Active memory management** - 10-15 memories in CLAUDE.md at a time
+- ✅ **Memory archiving** - Archived memories excluded from active context
+- ✅ **Atomic file operations** - Corruption-resistant index saves with backups
+- ✅ **Improved CLAUDE.md format** - Clear instructions for Claude
+
+### v2.1 (Future)
 - [ ] Vector database support (optional)
 - [ ] Better embedding models for juicing
 - [ ] Test coverage
-
-### v2.0 (Future)
 - [ ] Web UI for browsing memberberries
 - [ ] Team sharing (encrypted berries)
 - [ ] Claude Code plugin/extension
-- [ ] Multi-model support for deep scan
 
 ## Performance
 
