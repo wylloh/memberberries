@@ -75,7 +75,65 @@ The `member` command is a drop-in enhancement for `claude`:
 - Memberberries manages its own section (below a delimiter)
 - Context automatically updates based on what you're working on
 
-### AI-Powered Deep Scan (New!)
+## Command Reference
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `member "task"` | Sync context and launch Claude Code |
+| `member init` | Interactive project setup wizard |
+| `member setup` | Full installation wizard |
+| `member sync` | Sync CLAUDE.md without launching Claude |
+
+### Memory Management
+
+| Command | Description |
+|---------|-------------|
+| `member stats` | View memory analytics and distribution |
+| `member lookup <id>` | Get full content of a memory by ID |
+| `member expand` | Show all memories in full detail |
+| `member refresh` | Output context for mid-session refresh |
+| `member context` | Show current CLAUDE.md memberberries section |
+
+### Task & Focus
+
+| Command | Description |
+|---------|-------------|
+| `member deep "task"` | AI-powered context selection for task |
+| `member focus <task-id>` | Set active task for priority context |
+| `member focus --clear` | Clear active task focus |
+| `member tasks` | List all task clusters |
+| `member feedback <id> useful` | Mark memory as useful (+gravity) |
+| `member feedback <id> not-useful` | Mark memory as not useful (-gravity) |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `member config` | View current configuration |
+| `member config api-key <key>` | Set Anthropic API key for deep scan |
+
+### Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `member update` | Pull latest memberberries and regenerate hooks |
+| `member clean` | Remove low-quality and duplicate memories |
+| `member report` | Generate bug report with system info for GitHub issues |
+| `member --regenerate-hooks` | Fix stale hook paths after moving installation |
+
+### Pinned Memories
+
+| Command | Description |
+|---------|-------------|
+| `member pin "name" "content"` | Create a pinned memory |
+| `member pins` | List all pinned memories |
+| `member unpin <id>` | Remove a pinned memory |
+
+## Feature Details
+
+### AI-Powered Deep Scan
 
 For complex tasks, use AI to intelligently select the most relevant memories:
 
@@ -281,62 +339,6 @@ python memberberries.py search "database connection pooling"
 1. How to handle database connections in FastAPI
    Solution: Use lifespan context manager with connection pooling...
 ```
-
-## Command Reference
-
-### Core Commands
-
-| Command | Description |
-|---------|-------------|
-| `member "task"` | Sync context and launch Claude Code |
-| `member init` | Interactive project setup wizard |
-| `member setup` | Full installation wizard |
-| `member sync` | Sync CLAUDE.md without launching Claude |
-
-### Memory Management
-
-| Command | Description |
-|---------|-------------|
-| `member stats` | View memory analytics and distribution |
-| `member lookup <id>` | Get full content of a memory by ID |
-| `member expand` | Show all memories in full detail |
-| `member refresh` | Output context for mid-session refresh |
-| `member context` | Show current CLAUDE.md memberberries section |
-
-### Task & Focus
-
-| Command | Description |
-|---------|-------------|
-| `member deep "task"` | AI-powered context selection for task |
-| `member focus <task-id>` | Set active task for priority context |
-| `member focus --clear` | Clear active task focus |
-| `member tasks` | List all task clusters |
-| `member feedback <id> useful` | Mark memory as useful (+gravity) |
-| `member feedback <id> not-useful` | Mark memory as not useful (-gravity) |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `member config` | View current configuration |
-| `member config api-key <key>` | Set Anthropic API key for deep scan |
-
-### Maintenance
-
-| Command | Description |
-|---------|-------------|
-| `member update` | Pull latest memberberries and regenerate hooks |
-| `member clean` | Remove low-quality and duplicate memories |
-| `member report` | Generate bug report with system info for GitHub issues |
-| `member --regenerate-hooks` | Fix stale hook paths after moving installation |
-
-### Pinned Memories
-
-| Command | Description |
-|---------|-------------|
-| `member pin "name" "content"` | Create a pinned memory |
-| `member pins` | List all pinned memories |
-| `member unpin <id>` | Remove a pinned memory |
 
 ## Advanced Features
 
