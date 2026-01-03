@@ -18,7 +18,7 @@ from typing import List, Dict, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 
 from berry_manager import BerryManager
-from member import MemberberriesManager
+from member import ClaudeMDManager
 
 
 class MemoryExtractor:
@@ -1330,7 +1330,8 @@ def main():
             # This keeps working memory current within the session
             if marker_results['memories'] > 0 or marker_results['archives'] > 0:
                 try:
-                    manager = MemberberriesManager(project_path=args.project)
+                    project_path = Path(args.project) if args.project else Path.cwd()
+                    manager = ClaudeMDManager(project_path=project_path)
                     manager.sync_claude_md(quiet=True)
                 except Exception:
                     pass  # Don't fail the hook if sync fails
