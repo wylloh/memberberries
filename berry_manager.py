@@ -72,6 +72,7 @@ class BerryManager:
         self.testing_path = self.base_path / "testing"
         self.environment_path = self.base_path / "environment"
         self.api_notes_path = self.base_path / "api_notes"
+        self.pinned_path = self.base_path / "pinned"  # Protected memories
 
         # Create directories if they don't exist
         all_paths = [
@@ -79,7 +80,8 @@ class BerryManager:
             self.solutions_path, self.sessions_path,
             self.errors_path, self.antipatterns_path,
             self.git_conventions_path, self.dependencies_path,
-            self.testing_path, self.environment_path, self.api_notes_path
+            self.testing_path, self.environment_path, self.api_notes_path,
+            self.pinned_path
         ]
         for path in all_paths:
             path.mkdir(parents=True, exist_ok=True)
@@ -145,7 +147,18 @@ class BerryManager:
             "dependencies": {},  # Keyed by package name
             "testing": [],
             "environment": {},  # Keyed by env_type
-            "api_notes": []
+            "api_notes": [],
+            # Protected memories that are never auto-deleted
+            "pinned": [],  # List of {id, name, content, category, tags, timestamp}
+            # Adaptive learning - tracks user-specific signal words
+            "learned_signals": {
+                "emphasis": {},     # word -> count (words used with emphasis)
+                "repeated": {},     # word -> count (words that appear often)
+                "effective": []     # signals that led to successful captures
+            },
+            # Gravitational task clustering - memories orbit around task centers
+            "task_clusters": {},  # task_id -> {name, mass, memories: [memory_ids]}
+            "memory_gravity": {}  # memory_id -> {mass, references, last_accessed}
         }
 
         if self.index_path.exists():
@@ -782,6 +795,552 @@ class BerryManager:
         scored_notes.sort(reverse=True, key=lambda x: x[0])
         return [note for _, note in scored_notes[:top_k]]
 
+    # PINNED MEMORY MANAGEMENT (Protected memories that never get overwritten)
+
+    def add_pinned_memory(self, name: str, content: str, category: str = "general",
+                          tags: List[str] = None, sensitive: bool = False) -> Dict:
+        """Add a pinned/protected memory that will never be auto-deleted.
+
+        Use this for critical information like:
+        - SSH credentials for test environments
+        - API keys reference (not the actual keys!)
+        - Important server configurations
+        - Project-specific secrets management notes
+
+        Args:
+            name: Short, memorable name for this memory (e.g., "VPS SSH")
+            content: The content to remember (can include secrets)
+            category: Category (e.g., "credentials", "config", "server", "api")
+            tags: Tags for organization
+            sensitive: If True, marks as containing sensitive data
+
+        Returns:
+            The created pinned memory entry
+        """
+        timestamp = datetime.now().isoformat()
+        pin_id = hashlib.md5(f"{name}{timestamp}".encode()).hexdigest()[:12]
+
+        # Warn about sensitive data but allow storage
+        if sensitive:
+            print(f"⚠️  Storing sensitive data in pinned memory: {name}")
+            print("   This data is stored locally and never synced to cloud.")
+
+        pinned_data = {
+            "id": pin_id,
+            "name": name,
+            "content": content,
+            "category": category,
+            "tags": tags or [],
+            "sensitive": sensitive,
+            "timestamp": timestamp,
+            "pinned": True  # Always true for pinned memories
+        }
+
+        # Save to file with secure permissions
+        pin_file = self.pinned_path / f"{pin_id}.json"
+        self._secure_write_json(pin_file, pinned_data)
+
+        # Update index
+        self.index["pinned"].append(pinned_data)
+        self._save_index()
+
+        return pinned_data
+
+    def get_pinned_memories(self, category: str = None) -> List[Dict]:
+        """Get all pinned memories, optionally filtered by category.
+
+        Args:
+            category: Optional category filter
+
+        Returns:
+            List of pinned memory entries
+        """
+        pinned = self.index.get("pinned", [])
+        if category:
+            return [p for p in pinned if p.get("category") == category]
+        return pinned
+
+    def get_pinned_memory_by_name(self, name: str) -> Optional[Dict]:
+        """Get a pinned memory by its name.
+
+        Args:
+            name: The name of the pinned memory
+
+        Returns:
+            The pinned memory or None
+        """
+        for p in self.index.get("pinned", []):
+            if p.get("name", "").lower() == name.lower():
+                return p
+        return None
+
+    def unpin_memory(self, pin_id: str) -> bool:
+        """Remove a pinned memory (requires explicit ID).
+
+        Args:
+            pin_id: The ID of the pinned memory to remove
+
+        Returns:
+            True if successfully removed
+        """
+        pinned = self.index.get("pinned", [])
+        original_len = len(pinned)
+
+        self.index["pinned"] = [p for p in pinned if p.get("id") != pin_id]
+
+        if len(self.index["pinned"]) < original_len:
+            # Delete the file
+            pin_file = self.pinned_path / f"{pin_id}.json"
+            if pin_file.exists():
+                pin_file.unlink()
+            self._save_index()
+            return True
+        return False
+
+    def search_pinned(self, query: str, top_k: int = 3) -> List[Dict]:
+        """Search pinned memories by name, content, or tags.
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+
+        Returns:
+            Matching pinned memories
+        """
+        query_lower = query.lower()
+        scored = []
+
+        for p in self.index.get("pinned", []):
+            score = 0
+            # Name match is highest priority
+            if query_lower in p.get("name", "").lower():
+                score += 10
+            # Category match
+            if query_lower in p.get("category", "").lower():
+                score += 5
+            # Tag match
+            if any(query_lower in t.lower() for t in p.get("tags", [])):
+                score += 3
+            # Content match
+            if query_lower in p.get("content", "").lower():
+                score += 1
+
+            if score > 0:
+                scored.append((score, p))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [p for _, p in scored[:top_k]]
+
+    # ADAPTIVE SIGNAL LEARNING
+
+    def learn_signal(self, word: str, signal_type: str = "emphasis", weight: int = 1):
+        """Learn a user-specific signal word from their communication patterns.
+
+        Args:
+            word: The word or phrase to learn
+            signal_type: "emphasis" (caps, exclamation) or "repeated" (frequent use)
+            weight: How much to boost this signal's score
+        """
+        word = word.lower().strip()
+        if not word or len(word) < 3:
+            return
+
+        learned = self.index.get("learned_signals", {})
+        if signal_type not in learned:
+            learned[signal_type] = {}
+
+        if signal_type in ["emphasis", "repeated"]:
+            current = learned[signal_type].get(word, 0)
+            learned[signal_type][word] = current + weight
+            self.index["learned_signals"] = learned
+            self._save_index()
+
+    def record_effective_signal(self, signal: str):
+        """Record a signal that led to a successful memory capture.
+
+        This helps identify which signals work best for this user.
+        """
+        signal = signal.lower().strip()
+        learned = self.index.get("learned_signals", {})
+        if "effective" not in learned:
+            learned["effective"] = []
+
+        if signal not in learned["effective"]:
+            learned["effective"].append(signal)
+            self.index["learned_signals"] = learned
+            self._save_index()
+
+    def get_learned_signals(self, signal_type: str = None, min_count: int = 2) -> List[str]:
+        """Get learned signal words that have been used frequently.
+
+        Args:
+            signal_type: Optional filter by type ("emphasis", "repeated", "effective")
+            min_count: Minimum usage count to include (for emphasis/repeated)
+
+        Returns:
+            List of learned signal words
+        """
+        learned = self.index.get("learned_signals", {})
+        signals = []
+
+        if signal_type == "effective":
+            return learned.get("effective", [])
+
+        for stype in ["emphasis", "repeated"]:
+            if signal_type and stype != signal_type:
+                continue
+            type_signals = learned.get(stype, {})
+            for word, count in type_signals.items():
+                if count >= min_count:
+                    signals.append(word)
+
+        return list(set(signals))
+
+    def get_signal_score(self, word: str) -> int:
+        """Get the learned importance score for a word.
+
+        Higher scores mean the user tends to emphasize this word.
+        """
+        word = word.lower().strip()
+        learned = self.index.get("learned_signals", {})
+
+        score = 0
+        # Check emphasis
+        score += learned.get("emphasis", {}).get(word, 0)
+        # Check repeated
+        score += learned.get("repeated", {}).get(word, 0) // 2
+        # Bonus if it's proven effective
+        if word in learned.get("effective", []):
+            score += 5
+
+        return score
+
+    # AUTO-PIN DETECTION
+
+    # Patterns that indicate content should be auto-pinned
+    AUTO_PIN_PATTERNS = [
+        (r'ssh\s+[\w.-]+@[\w.-]+', 'credentials', 'SSH connection'),
+        (r'[\w.-]+@[\w.-]+:\d+', 'server', 'Server address'),
+        (r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?', 'server', 'IP address'),
+        (r'sk-[a-zA-Z0-9]{20,}', 'credentials', 'API key'),
+        (r'ghp_[a-zA-Z0-9]{30,}', 'credentials', 'GitHub token'),
+        (r'-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY', 'credentials', 'Private key'),
+        (r'Bearer\s+[A-Za-z0-9._-]{20,}', 'credentials', 'Bearer token'),
+        (r'mongodb(?:\+srv)?://[^\s]+', 'database', 'MongoDB URI'),
+        (r'postgres(?:ql)?://[^\s]+', 'database', 'PostgreSQL URI'),
+        (r'mysql://[^\s]+', 'database', 'MySQL URI'),
+        (r'redis://[^\s]+', 'database', 'Redis URI'),
+        (r'https?://[\w.-]+(?::\d+)?/api/v\d+', 'api', 'API endpoint'),
+    ]
+
+    def detect_auto_pin(self, text: str) -> Optional[Dict]:
+        """Detect if text contains patterns that should be auto-pinned.
+
+        Returns pin metadata if pattern detected, None otherwise.
+        """
+        for pattern, category, description in self.AUTO_PIN_PATTERNS:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return {
+                    'category': category,
+                    'description': description,
+                    'matched': match.group(0),
+                    'sensitive': category == 'credentials'
+                }
+        return None
+
+    def auto_pin_if_needed(self, text: str, name_hint: str = None) -> Optional[Dict]:
+        """Auto-pin content if it matches credential/config patterns.
+
+        Args:
+            text: Content to check and potentially pin
+            name_hint: Optional name hint for the pinned memory
+
+        Returns:
+            Created pin if auto-pinned, None otherwise
+        """
+        detected = self.detect_auto_pin(text)
+        if not detected:
+            return None
+
+        # Generate name from hint or description
+        name = name_hint or f"Auto: {detected['description']}"
+
+        # Check if already pinned (avoid duplicates)
+        existing = self.get_pinned_memories(category=detected['category'])
+        for p in existing:
+            if detected['matched'] in p.get('content', ''):
+                return None  # Already pinned
+
+        # Create the pin
+        return self.add_pinned_memory(
+            name=name,
+            content=text,
+            category=detected['category'],
+            tags=['auto-pinned', detected['description'].lower().replace(' ', '-')],
+            sensitive=detected['sensitive']
+        )
+
+    # GRAVITATIONAL TASK CLUSTERING
+    # Memories cluster around task centers based on frequency and amplitude
+
+    def create_task_cluster(self, name: str, description: str = "",
+                           parent_task: str = None) -> str:
+        """Create a task cluster that memories can orbit around.
+
+        Args:
+            name: Task name (e.g., "implement-auth", "fix-memory-bug")
+            description: Optional task description
+            parent_task: Optional parent task ID for subtask hierarchy
+
+        Returns:
+            task_id for the created cluster
+        """
+        task_id = hashlib.md5(f"{name}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+
+        clusters = self.index.get("task_clusters", {})
+        clusters[task_id] = {
+            "name": name,
+            "description": description,
+            "parent": parent_task,
+            "mass": 1,  # Initial gravitational mass
+            "memories": [],  # Memory IDs that orbit this task
+            "created": datetime.now().isoformat(),
+            "last_active": datetime.now().isoformat()
+        }
+
+        self.index["task_clusters"] = clusters
+        self._save_index()
+        return task_id
+
+    def attach_memory_to_task(self, memory_id: str, task_id: str,
+                              memory_type: str = "solution"):
+        """Attach a memory to a task cluster, increasing both masses.
+
+        Args:
+            memory_id: ID of the memory to attach
+            task_id: ID of the task cluster
+            memory_type: Type of memory (for context)
+        """
+        clusters = self.index.get("task_clusters", {})
+        gravity = self.index.get("memory_gravity", {})
+
+        if task_id not in clusters:
+            return
+
+        # Add memory to task's orbit
+        if memory_id not in clusters[task_id]["memories"]:
+            clusters[task_id]["memories"].append(memory_id)
+            clusters[task_id]["mass"] += 1  # Task gains mass
+            clusters[task_id]["last_active"] = datetime.now().isoformat()
+
+        # Initialize or update memory gravity
+        if memory_id not in gravity:
+            gravity[memory_id] = {
+                "mass": 1,
+                "references": 0,
+                "tasks": [],
+                "last_accessed": datetime.now().isoformat()
+            }
+
+        if task_id not in gravity[memory_id]["tasks"]:
+            gravity[memory_id]["tasks"].append(task_id)
+            gravity[memory_id]["mass"] += 1
+
+        self.index["task_clusters"] = clusters
+        self.index["memory_gravity"] = gravity
+        self._save_index()
+
+    def reference_memory(self, memory_id: str):
+        """Record that a memory was referenced, increasing its gravitational mass."""
+        gravity = self.index.get("memory_gravity", {})
+
+        if memory_id not in gravity:
+            gravity[memory_id] = {
+                "mass": 1,
+                "references": 0,
+                "tasks": [],
+                "last_accessed": datetime.now().isoformat()
+            }
+
+        gravity[memory_id]["references"] += 1
+        gravity[memory_id]["mass"] += 0.5  # Gradual mass increase
+        gravity[memory_id]["last_accessed"] = datetime.now().isoformat()
+
+        self.index["memory_gravity"] = gravity
+        self._save_index()
+
+    def get_task_memories(self, task_id: str, include_subtasks: bool = True) -> List[Dict]:
+        """Get all memories orbiting a task cluster.
+
+        Args:
+            task_id: Task cluster ID
+            include_subtasks: Whether to include memories from subtasks
+
+        Returns:
+            List of memories sorted by gravitational mass (highest first)
+        """
+        clusters = self.index.get("task_clusters", {})
+        gravity = self.index.get("memory_gravity", {})
+
+        if task_id not in clusters:
+            return []
+
+        memory_ids = set(clusters[task_id]["memories"])
+
+        # Include subtask memories if requested
+        if include_subtasks:
+            for tid, cluster in clusters.items():
+                if cluster.get("parent") == task_id:
+                    memory_ids.update(cluster["memories"])
+
+        # Gather memories with their gravity scores
+        memories_with_mass = []
+        for mid in memory_ids:
+            mass = gravity.get(mid, {}).get("mass", 1)
+            # Find the actual memory data
+            memory = self._find_memory_by_id(mid)
+            if memory:
+                memory["_gravity_mass"] = mass
+                memories_with_mass.append(memory)
+
+        # Sort by mass (highest gravity first)
+        memories_with_mass.sort(key=lambda m: m.get("_gravity_mass", 0), reverse=True)
+        return memories_with_mass
+
+    def _find_memory_by_id(self, memory_id: str) -> Optional[Dict]:
+        """Find a memory by its ID across all memory types."""
+        for mem_type in ["solutions", "errors", "antipatterns", "pinned"]:
+            for mem in self.index.get(mem_type, []):
+                if mem.get("id") == memory_id:
+                    return mem
+        return None
+
+    def apply_staleness_decay(self, decay_days: int = 7, decay_factor: float = 0.9):
+        """Apply gravitational decay to memories that haven't been accessed recently.
+
+        Memories lose mass over time if not referenced, keeping context fresh.
+
+        Args:
+            decay_days: Days of inactivity before decay applies
+            decay_factor: Multiplier applied to mass (0.9 = 10% decay)
+        """
+        gravity = self.index.get("memory_gravity", {})
+        now = datetime.now()
+        updated = False
+
+        for mid, gdata in gravity.items():
+            last_accessed = gdata.get("last_accessed")
+            if last_accessed:
+                try:
+                    last_dt = datetime.fromisoformat(last_accessed)
+                    days_inactive = (now - last_dt).days
+                    if days_inactive >= decay_days:
+                        # Apply decay
+                        old_mass = gdata.get("mass", 1)
+                        new_mass = max(0.1, old_mass * decay_factor)
+                        gdata["mass"] = new_mass
+                        updated = True
+                except (ValueError, TypeError):
+                    pass
+
+        if updated:
+            self.index["memory_gravity"] = gravity
+            self._save_index()
+
+    def get_high_gravity_memories(self, top_k: int = 10) -> List[Dict]:
+        """Get memories with highest gravitational mass (most referenced/important).
+
+        These are the "center of mass" memories that should be prioritized.
+        Applies staleness decay before retrieval.
+        """
+        # Apply decay to stale memories
+        self.apply_staleness_decay()
+
+        gravity = self.index.get("memory_gravity", {})
+
+        # Sort by mass
+        sorted_gravity = sorted(
+            gravity.items(),
+            key=lambda x: x[1].get("mass", 0),
+            reverse=True
+        )[:top_k]
+
+        memories = []
+        for mid, gdata in sorted_gravity:
+            mem = self._find_memory_by_id(mid)
+            if mem:
+                mem["_gravity_mass"] = gdata.get("mass", 1)
+                mem["_references"] = gdata.get("references", 0)
+                memories.append(mem)
+
+        return memories
+
+    def get_task_hierarchy(self, task_id: str = None) -> List[Dict]:
+        """Get task clusters in hierarchical structure.
+
+        Args:
+            task_id: Optional root task ID (None for all top-level)
+
+        Returns:
+            List of tasks with their subtasks nested
+        """
+        clusters = self.index.get("task_clusters", {})
+
+        def build_tree(parent_id):
+            children = []
+            for tid, cluster in clusters.items():
+                if cluster.get("parent") == parent_id:
+                    task = {
+                        "id": tid,
+                        "name": cluster["name"],
+                        "description": cluster.get("description", ""),
+                        "mass": cluster.get("mass", 1),
+                        "memory_count": len(cluster.get("memories", [])),
+                        "subtasks": build_tree(tid)
+                    }
+                    children.append(task)
+            return sorted(children, key=lambda x: x["mass"], reverse=True)
+
+        return build_tree(task_id)
+
+    def auto_cluster_memory(self, memory_id: str, tags: List[str], content: str):
+        """Automatically attach a memory to relevant task clusters based on tags/content.
+
+        Uses semantic matching to find the best task cluster.
+        """
+        clusters = self.index.get("task_clusters", {})
+        if not clusters:
+            return
+
+        # Score each cluster based on tag/content overlap
+        scores = []
+        content_words = set(content.lower().split())
+        tag_set = set(t.lower() for t in tags)
+
+        for tid, cluster in clusters.items():
+            score = 0
+            cluster_name_words = set(cluster["name"].lower().replace("-", " ").split())
+            cluster_desc_words = set(cluster.get("description", "").lower().split())
+
+            # Tag matches
+            score += len(tag_set & cluster_name_words) * 3
+            score += len(tag_set & cluster_desc_words) * 2
+
+            # Content word matches
+            score += len(content_words & cluster_name_words) * 2
+            score += len(content_words & cluster_desc_words)
+
+            if score > 0:
+                scores.append((tid, score))
+
+        # Attach to highest scoring cluster if score is significant
+        if scores:
+            scores.sort(key=lambda x: x[1], reverse=True)
+            best_tid, best_score = scores[0]
+            if best_score >= 3:  # Threshold
+                self.attach_memory_to_task(memory_id, best_tid)
+
     # CONTEXT INJECTION
     
     def get_relevant_context(self, query: str, project_path: str = None,
@@ -924,7 +1483,8 @@ class BerryManager:
             "dependencies": len(self.index["dependencies"]),
             "testing": len(self.index["testing"]),
             "environment": len(self.index["environment"]),
-            "api_notes": len(self.index["api_notes"])
+            "api_notes": len(self.index["api_notes"]),
+            "pinned": len(self.index.get("pinned", []))
         }
 
 

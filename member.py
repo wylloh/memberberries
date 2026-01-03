@@ -411,23 +411,201 @@ class ClaudeMDManager:
         """Rough token estimate (1 token ≈ 4 characters)."""
         return len(text) // 4
 
-    def _format_memory_item(self, memory_type: str, item: dict) -> str:
-        """Format a single memory item for display."""
-        if memory_type == 'preference':
-            return f"- **{item['category']}**: {item['content']}"
+    def _smart_truncate(self, text: str, max_len: int = 300) -> str:
+        """Truncate text intelligently, preserving complete thoughts."""
+        if len(text) <= max_len:
+            return text
+
+        # Look for natural break points before max_len
+        break_chars = ['. ', '! ', '? ', '; ', ', ', ' - ', '\n']
+        best_break = max_len
+
+        for char in break_chars:
+            idx = text.rfind(char, 0, max_len)
+            if idx != -1 and idx > max_len * 0.6:
+                best_break = idx + len(char)
+                break
+
+        if best_break == max_len:
+            space_idx = text.rfind(' ', 0, max_len)
+            if space_idx > max_len * 0.6:
+                best_break = space_idx
+
+        return text[:best_break].strip() + "..."
+
+    def _contains_credential_pattern(self, text: str) -> bool:
+        """Check if text contains credential-like patterns that shouldn't be compressed."""
+        import re
+        credential_patterns = [
+            r'ssh\s+\w+@',           # SSH connections
+            r'[\w.-]+@[\w.-]+:\d+',  # user@host:port
+            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}',  # IP addresses
+            r':[A-Za-z0-9+/=]{20,}', # Long base64-like tokens
+            r'sk-[a-zA-Z0-9]{20,}',  # API keys (OpenAI style)
+            r'ghp_[a-zA-Z0-9]{30,}', # GitHub tokens
+            r'Bearer\s+\S{20,}',     # Bearer tokens
+            r'-----BEGIN',           # PEM keys
+            r'~/.ssh/',              # SSH paths
+            r'\.pem\b',              # PEM files
+            r'\.key\b',              # Key files
+            r'password[=:]\s*\S+',   # Password assignments
+            r'api[_-]?key[=:]\s*\S+', # API key assignments
+        ]
+        for pattern in credential_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        return False
+
+    def _compress_shorthand(self, text: str, protect_credentials: bool = True) -> str:
+        """Compress text using shorthand abbreviations to save tokens.
+
+        Applies common programming abbreviations while preserving meaning.
+        Skips compression for credential-containing text to preserve accuracy.
+
+        Args:
+            text: Text to compress
+            protect_credentials: If True, skip compression for credential patterns
+        """
+        import re
+
+        # Don't compress if text contains credentials
+        if protect_credentials and self._contains_credential_pattern(text):
+            return text
+
+        # Common abbreviations (ordered from longest to shortest to avoid conflicts)
+        abbrevs = [
+            ('configuration', 'config'),
+            ('authentication', 'auth'),
+            ('authorization', 'authz'),
+            ('implementation', 'impl'),
+            ('specification', 'spec'),
+            ('requirements', 'reqs'),
+            ('dependencies', 'deps'),
+            ('initialization', 'init'),
+            ('administrator', 'admin'),
+            ('documentation', 'docs'),
+            ('application', 'app'),
+            ('environment', 'env'),
+            ('development', 'dev'),
+            ('production', 'prod'),
+            ('information', 'info'),
+            ('dependency', 'dep'),
+            ('repository', 'repo'),
+            ('directory', 'dir'),
+            ('components', 'comps'),
+            ('component', 'comp'),
+            ('initialize', 'init'),
+            ('management', 'mgmt'),
+            ('attributes', 'attrs'),
+            ('properties', 'props'),
+            ('expression', 'expr'),
+            ('utilities', 'utils'),
+            ('libraries', 'libs'),
+            ('temporary', 'tmp'),
+            ('javascript', 'JS'),
+            ('typescript', 'TS'),
+            ('function', 'fn'),
+            ('variable', 'var'),
+            ('parameter', 'param'),
+            ('interface', 'iface'),
+            ('attribute', 'attr'),
+            ('arguments', 'args'),
+            ('property', 'prop'),
+            ('database', 'db'),
+            ('argument', 'arg'),
+            ('packages', 'pkgs'),
+            ('messages', 'msgs'),
+            ('commands', 'cmds'),
+            ('response', 'resp'),
+            ('previous', 'prev'),
+            ('original', 'orig'),
+            ('objects', 'objs'),
+            ('request', 'req'),
+            ('message', 'msg'),
+            ('execute', 'exec'),
+            ('command', 'cmd'),
+            ('current', 'curr'),
+            ('utility', 'util'),
+            ('library', 'lib'),
+            ('package', 'pkg'),
+            ('version', 'ver'),
+            ('maximum', 'max'),
+            ('minimum', 'min'),
+            ('boolean', 'bool'),
+            ('integer', 'int'),
+            ('context', 'ctx'),
+            ('source', 'src'),
+            ('number', 'num'),
+            ('string', 'str'),
+            ('object', 'obj'),
+            ('buffer', 'buf'),
+            ('python', 'py'),
+            ('button', 'btn'),
+            ('image', 'img'),
+            ('index', 'idx'),
+            ('char', 'ch'),
+        ]
+
+        result = text
+        for full, short in abbrevs:
+            # Case-insensitive replacement
+            pattern = re.compile(re.escape(full), re.IGNORECASE)
+            result = pattern.sub(short, result)
+
+        return result
+
+    def _format_memory_item(self, memory_type: str, item: dict, compress: bool = True) -> str:
+        """Format a single memory item for display.
+
+        Uses smart truncation to preserve meaningful context.
+        Applies shorthand compression to save tokens.
+
+        Args:
+            memory_type: Type of memory (pinned, preference, solution, etc.)
+            item: Memory data dictionary
+            compress: Whether to apply shorthand compression (default: True)
+        """
+        def process(text: str, max_len: int) -> str:
+            """Truncate and optionally compress text."""
+            result = self._smart_truncate(text, max_len=max_len)
+            if compress:
+                result = self._compress_shorthand(result)
+            return result
+
+        if memory_type == 'pinned':
+            name = item.get('name', 'Pinned')
+            content = process(item.get('content', ''), 500)
+            category = item.get('category', '')
+            sensitive_marker = " 🔒" if item.get('sensitive') else ""
+            return f"- **{name}**{sensitive_marker} [{category}]: {content}"
+        elif memory_type == 'preference':
+            content = process(item['content'], 400)
+            return f"- **{item['category']}**: {content}"
         elif memory_type == 'solution':
-            return f"- **{item['problem']}**: {item['solution']}"
+            problem = process(item['problem'], 200)
+            solution = process(item['solution'], 400)
+            # Mark pinned items
+            pin_marker = " 📌" if item.get('pinned') else ""
+            return f"- **{problem}**{pin_marker}: {solution}"
         elif memory_type == 'error':
-            msg = item['error_message'][:100] + "..." if len(item['error_message']) > 100 else item['error_message']
-            return f"- **{msg}**: {item['resolution']}"
+            msg = process(item['error_message'], 200)
+            resolution = process(item['resolution'], 400)
+            return f"- **{msg}**: {resolution}"
         elif memory_type == 'antipattern':
-            return f"- **Don't**: {item['pattern']}\n  - *Why*: {item['reason']}\n  - *Instead*: {item['alternative']}"
+            pattern = process(item['pattern'], 200)
+            reason = process(item['reason'], 200)
+            alt = process(item['alternative'], 200)
+            return f"- **Don't**: {pattern}\n  - *Why*: {reason}\n  - *Instead*: {alt}"
         elif memory_type == 'git_convention':
-            return f"- **{item['convention_type']}**: {item['pattern']}\n  - *Example*: `{item['example']}`"
+            pattern = process(item['pattern'], 200)
+            example = process(item['example'], 150)
+            return f"- **{item['convention_type']}**: {pattern}\n  - *Example*: `{example}`"
         elif memory_type == 'testing':
-            return f"- **{item['strategy']} ({item['framework']})**: {item['pattern']}"
+            pattern = process(item['pattern'], 300)
+            return f"- **{item['strategy']} ({item['framework']})**: {pattern}"
         elif memory_type == 'api_note':
-            return f"- **{item['service_name']}**: {item['notes']}"
+            notes = process(item['notes'], 400)
+            return f"- **{item['service_name']}**: {notes}"
         return ""
 
     def generate_memberberries_section(self, query: str = None, max_tokens: int = 1500) -> str:
@@ -443,11 +621,18 @@ class ClaudeMDManager:
         # Get query for search, or use generic
         search_query = query or "general development context"
 
-        # Header with timestamp (always included)
-        header_lines = [f"\n*Context synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}*"]
+        # Header with actionable context for Claude
+        header_lines = [
+            f"\n*Synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+            "",
+            "**How to use this context:**",
+            "- 📌 Pinned = Protected info (credentials, configs) - preserve exactly",
+            "- ⚫ High Gravity = Frequently referenced - likely relevant",
+            "- Memories are ranked by importance; top items most critical",
+        ]
         if query:
             display_query = query[:80] + "..." if len(query) > 80 else query
-            header_lines.append(f"*Query: {display_query}*")
+            header_lines.append(f"\n*Current focus: {display_query}*")
 
         header = "\n".join(header_lines)
         current_tokens = self._estimate_tokens(header)
@@ -455,6 +640,16 @@ class ClaudeMDManager:
         # Collect all memories with priority scores
         # Priority: Higher = more important = added first
         memory_groups = []
+
+        # Priority 0 (HIGHEST): Pinned memories - always shown first
+        pinned = self.bm.get_pinned_memories()
+        if pinned:
+            memory_groups.append(('📌 Pinned', 'pinned', pinned, 200))
+
+        # Priority 0.5: High-gravity memories (most referenced/important)
+        high_gravity = self.bm.get_high_gravity_memories(top_k=3)
+        if high_gravity:
+            memory_groups.append(('⚫ High Gravity', 'solution', high_gravity, 150))
 
         # Priority 1: High-priority tagged items (repeated, confirmed)
         solutions = self.bm.search_solutions(search_query, top_k=5)
@@ -501,10 +696,12 @@ class ClaudeMDManager:
         memory_groups.sort(key=lambda x: x[3], reverse=True)
 
         # Build sections within token budget
+        # Track seen memory IDs to avoid duplication
+        seen_ids = set()
         sections = [header]
         items_added = 0
 
-        for group_name, memory_type, items, priority in memory_groups:
+        for group_name, memory_type, items, _ in memory_groups:
             if current_tokens >= max_tokens:
                 break
 
@@ -519,6 +716,13 @@ class ClaudeMDManager:
             group_tokens = self._estimate_tokens(group_header)
 
             for item in items:
+                # Deduplication: skip if we've already seen this memory
+                item_id = item.get('id')
+                if item_id:
+                    if item_id in seen_ids:
+                        continue
+                    seen_ids.add(item_id)
+
                 formatted = self._format_memory_item(memory_type, item)
                 item_tokens = self._estimate_tokens(formatted)
 
@@ -897,6 +1101,9 @@ Commands:
   member "task description"       Start session focused on specific task
   member init                     Interactive project setup wizard
   member setup                    Full installation wizard
+  member pin                      Pin a new memory (interactive)
+  member pins                     List all pinned memories
+  member unpin <id>               Remove a pinned memory
 
 Options:
   member --sync-only              Just sync CLAUDE.md, don't launch
@@ -908,6 +1115,20 @@ The 'member' command:
 1. Syncs relevant memories into CLAUDE.md
 2. Launches Claude Code with pre-loaded context
 3. Hooks keep context fresh on every prompt
+
+Pinned Memories:
+  Pinned memories are protected and always shown at the top.
+  Use them for SSH credentials, API configs, server details, etc.
+
+Task Clusters (Gravitational Memory Organization):
+  member task "name"              Create a new task cluster
+  member task "name" --parent ID  Create subtask under parent
+  member tasks                    List all task clusters
+  member task-show <id>           Show memories for a task
+
+Git Workflow:
+  member --install-hook           Install git pre-commit hook (auto-cleans CLAUDE.md)
+  member --clean                  Manually clean memberberries section before commit
         """
     )
 
@@ -929,8 +1150,55 @@ The 'member' command:
                         help='Use global memberberries storage')
     parser.add_argument('--local', dest='local_storage', action='store_true',
                         help='Use per-project memberberries storage')
+    parser.add_argument('--install-hook', action='store_true',
+                        help='Install git pre-commit hook to auto-clean CLAUDE.md')
 
     args = parser.parse_args()
+
+    # Handle --install-hook
+    if args.install_hook:
+        project_path = Path(args.project) if args.project else Path.cwd()
+        git_dir = project_path / ".git"
+        if not git_dir.exists():
+            print("Error: Not a git repository.")
+            return
+
+        hooks_dir = git_dir / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        pre_commit = hooks_dir / "pre-commit"
+
+        hook_content = f'''#!/bin/bash
+# Memberberries pre-commit hook
+# Cleans the memberberries section from CLAUDE.md before committing
+
+CLAUDE_MD="CLAUDE.md"
+if [ -f "$CLAUDE_MD" ]; then
+    # Check if CLAUDE.md is staged
+    if git diff --cached --name-only | grep -q "^$CLAUDE_MD$"; then
+        # Clean the memberberries section
+        python3 "{MEMBERBERRIES_DIR}/member.py" --clean --quiet 2>/dev/null
+        # Re-stage the cleaned file
+        git add "$CLAUDE_MD"
+    fi
+fi
+'''
+        # Check if pre-commit already exists
+        if pre_commit.exists():
+            existing = pre_commit.read_text()
+            if "Memberberries" in existing:
+                print("Memberberries hook already installed.")
+                return
+            # Append to existing hook
+            with open(pre_commit, 'a') as f:
+                f.write("\n" + hook_content)
+        else:
+            with open(pre_commit, 'w') as f:
+                f.write(hook_content)
+
+        os.chmod(pre_commit, 0o755)
+        print("✅ Git pre-commit hook installed!")
+        print("   CLAUDE.md will be auto-cleaned before each commit.")
+        return
 
     # Handle subcommands
     if args.task == 'setup':
@@ -949,6 +1217,210 @@ The 'member' command:
             manager.claude_md_path.unlink()
         manager.ensure_claude_md_exists(interactive=True)
         print(f"\nCLAUDE.md created! Run 'member' to start your session.")
+        return
+
+    # Handle pin command
+    if args.task == 'pin':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        print("\n📌 Pin a New Memory")
+        print("="*50)
+        print("Pinned memories are protected and always shown.\n")
+
+        name = input("Name (short, memorable): ").strip()
+        if not name:
+            print("Cancelled - name is required.")
+            return
+
+        print("\nCategories: credentials, config, server, api, database, general")
+        category = input("Category [general]: ").strip() or "general"
+
+        print("\nEnter the content (can be multi-line, end with empty line):")
+        content_lines = []
+        while True:
+            line = input()
+            if not line:
+                break
+            content_lines.append(line)
+        content = "\n".join(content_lines)
+
+        if not content:
+            print("Cancelled - content is required.")
+            return
+
+        tags_input = input("\nTags (comma-separated, optional): ").strip()
+        tags = [t.strip() for t in tags_input.split(",")] if tags_input else []
+
+        sensitive = input("Contains sensitive data? [y/N]: ").strip().lower() == 'y'
+
+        pin = bm.add_pinned_memory(name, content, category, tags, sensitive)
+        print(f"\n✅ Pinned memory created!")
+        print(f"   ID: {pin['id']}")
+        print(f"   Name: {pin['name']}")
+        return
+
+    # Handle pins (list) command
+    if args.task == 'pins':
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        pinned = bm.get_pinned_memories()
+        if not pinned:
+            print("\nNo pinned memories found.")
+            print("Use 'member pin' to create one.")
+            return
+
+        print(f"\n📌 Pinned Memories ({len(pinned)})")
+        print("="*60)
+        for p in pinned:
+            sensitive_marker = " 🔒" if p.get('sensitive') else ""
+            print(f"\n[{p['id']}] {p['name']}{sensitive_marker}")
+            print(f"  Category: {p['category']}")
+            if p.get('tags'):
+                print(f"  Tags: {', '.join(p['tags'])}")
+            # Show content preview (truncate for display)
+            content_preview = p['content'][:100] + "..." if len(p['content']) > 100 else p['content']
+            print(f"  Content: {content_preview}")
+        print()
+        return
+
+    # Handle unpin command
+    if args.task and args.task.startswith('unpin'):
+        parts = args.task.split(maxsplit=1)
+        if len(parts) < 2:
+            print("Usage: member unpin <id>")
+            print("Use 'member pins' to see available IDs.")
+            return
+
+        pin_id = parts[1].strip()
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        # Confirm deletion
+        pin = None
+        for p in bm.get_pinned_memories():
+            if p['id'] == pin_id:
+                pin = p
+                break
+
+        if not pin:
+            print(f"Pinned memory '{pin_id}' not found.")
+            print("Use 'member pins' to see available IDs.")
+            return
+
+        confirm = input(f"Remove pinned memory '{pin['name']}'? [y/N]: ").strip().lower()
+        if confirm != 'y':
+            print("Cancelled.")
+            return
+
+        if bm.unpin_memory(pin_id):
+            print(f"✅ Unpinned: {pin['name']}")
+        else:
+            print("Failed to unpin memory.")
+        return
+
+    # Handle task cluster commands
+    if args.task and args.task.startswith('task '):
+        # Create new task: member task "name"
+        task_name = args.task[5:].strip().strip('"\'')
+        if not task_name:
+            print("Usage: member task \"task name\"")
+            return
+
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        # Check for --parent flag (simple parsing)
+        parent_id = None
+        if '--parent' in task_name:
+            parts = task_name.split('--parent')
+            task_name = parts[0].strip().strip('"\'')
+            if len(parts) > 1:
+                parent_id = parts[1].strip()
+
+        print(f"\n🎯 Creating Task Cluster: {task_name}")
+        description = input("Description (optional): ").strip()
+
+        task_id = bm.create_task_cluster(task_name, description, parent_id)
+        print(f"✅ Task cluster created!")
+        print(f"   ID: {task_id}")
+        print(f"   Name: {task_name}")
+        if parent_id:
+            print(f"   Parent: {parent_id}")
+        print("\nMemories will automatically cluster around this task.")
+        return
+
+    if args.task == 'tasks':
+        # List all task clusters
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        hierarchy = bm.get_task_hierarchy()
+        if not hierarchy:
+            print("\nNo task clusters found.")
+            print("Use 'member task \"name\"' to create one.")
+            return
+
+        print(f"\n🎯 Task Clusters (Gravitational Organization)")
+        print("="*60)
+
+        def print_tree(tasks, indent=0):
+            for t in tasks:
+                mass_bar = "●" * min(t['mass'], 10)
+                prefix = "  " * indent
+                print(f"{prefix}[{t['id']}] {t['name']}")
+                print(f"{prefix}  Mass: {mass_bar} ({t['mass']})")
+                print(f"{prefix}  Memories: {t['memory_count']}")
+                if t.get('subtasks'):
+                    print_tree(t['subtasks'], indent + 1)
+
+        print_tree(hierarchy)
+        print()
+        return
+
+    if args.task and args.task.startswith('task-show '):
+        # Show memories for a task
+        task_id = args.task[10:].strip()
+        if not task_id:
+            print("Usage: member task-show <task_id>")
+            return
+
+        project_path = Path(args.project) if args.project else Path.cwd()
+        storage_mode = 'global' if getattr(args, 'global_storage', False) else 'auto'
+        bm = BerryManager(storage_mode=storage_mode, project_path=str(project_path))
+
+        clusters = bm.index.get("task_clusters", {})
+        if task_id not in clusters:
+            print(f"Task '{task_id}' not found.")
+            print("Use 'member tasks' to see available tasks.")
+            return
+
+        cluster = clusters[task_id]
+        memories = bm.get_task_memories(task_id)
+
+        print(f"\n🎯 Task: {cluster['name']}")
+        print("="*60)
+        if cluster.get('description'):
+            print(f"Description: {cluster['description']}")
+        print(f"Mass: {cluster.get('mass', 1)} | Memories: {len(memories)}")
+        print()
+
+        if not memories:
+            print("No memories attached to this task yet.")
+            print("Memories will auto-cluster as you work.")
+        else:
+            print("Memories (sorted by gravitational mass):")
+            for m in memories[:10]:  # Limit display
+                mass = m.get('_gravity_mass', 1)
+                problem = m.get('problem', m.get('error_message', 'Unknown'))[:60]
+                print(f"  [{mass:.1f}⚫] {problem}")
+        print()
         return
 
     # Determine project path

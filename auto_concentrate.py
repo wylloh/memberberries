@@ -21,7 +21,10 @@ from berry_manager import BerryManager
 
 
 class MemoryExtractor:
-    """Extracts memories from conversation text."""
+    """Extracts memories from conversation text.
+
+    Includes adaptive learning to detect user-specific communication patterns.
+    """
 
     # === SEMANTIC SIGNALS ===
     # These indicate important moments worth capturing
@@ -117,8 +120,222 @@ class MemoryExtractor:
         'error': ['error', 'exception', 'bug', 'fix', 'debug', 'issue'],
     }
 
-    def __init__(self):
+    def __init__(self, berry_manager: 'BerryManager' = None):
         self.extracted_memories = []
+        self.bm = berry_manager  # For adaptive learning
+
+    def detect_emphasis_patterns(self, text: str) -> List[str]:
+        """Detect words that appear to be emphasized by the user.
+
+        Looks for:
+        - ALL CAPS words
+        - Words followed by exclamation marks
+        - Words in asterisks or underscores
+        - Repeated words within a short span
+        """
+        emphasized = []
+
+        # ALL CAPS words (3+ letters, not common acronyms)
+        caps_pattern = r'\b([A-Z]{3,})\b'
+        common_acronyms = {'API', 'URL', 'HTTP', 'HTML', 'CSS', 'SQL', 'JSON', 'XML', 'SDK', 'CLI'}
+        for match in re.finditer(caps_pattern, text):
+            word = match.group(1)
+            if word not in common_acronyms:
+                emphasized.append(word.lower())
+
+        # Words before exclamation marks
+        exclaim_pattern = r'(\w+)!'
+        for match in re.finditer(exclaim_pattern, text):
+            emphasized.append(match.group(1).lower())
+
+        # Words in emphasis markers (*word*, _word_, **word**)
+        emphasis_markers = [
+            r'\*\*(\w+)\*\*',  # **bold**
+            r'\*(\w+)\*',      # *italic*
+            r'_(\w+)_',        # _underline_
+        ]
+        for pattern in emphasis_markers:
+            for match in re.finditer(pattern, text):
+                emphasized.append(match.group(1).lower())
+
+        # Detect repeated words within close proximity (sign of emphasis)
+        words = text.lower().split()
+        word_positions = {}
+        for i, word in enumerate(words):
+            if len(word) > 3:  # Skip short words
+                word = re.sub(r'[^\w]', '', word)
+                if word in word_positions:
+                    # If same word appears within 10 words, it's emphasized
+                    if i - word_positions[word] < 10:
+                        emphasized.append(word)
+                word_positions[word] = i
+
+        return list(set(emphasized))
+
+    def learn_from_text(self, text: str):
+        """Learn user-specific signal words from their communication.
+
+        Analyzes text for emphasis patterns and updates the learning model.
+        """
+        if not self.bm:
+            return
+
+        # Detect emphasis patterns
+        emphasized = self.detect_emphasis_patterns(text)
+        for word in emphasized:
+            self.bm.learn_signal(word, "emphasis", weight=1)
+
+        # Track word frequencies for repetition learning
+        words = text.lower().split()
+        word_counts = {}
+        for word in words:
+            word = re.sub(r'[^\w]', '', word)
+            if len(word) > 4:  # Skip short words
+                word_counts[word] = word_counts.get(word, 0) + 1
+
+        # Learn words that appear frequently in this text
+        for word, count in word_counts.items():
+            if count >= 3:  # Appeared 3+ times in this message
+                self.bm.learn_signal(word, "repeated", weight=count // 3)
+
+    def _smart_truncate(self, text: str, max_len: int = 500) -> str:
+        """Truncate text intelligently, preserving complete thoughts.
+
+        Instead of cutting mid-word/sentence, finds natural break points.
+        """
+        if len(text) <= max_len:
+            return text
+
+        # Look for natural break points before max_len
+        break_chars = ['. ', '! ', '? ', '; ', ', ', ' - ', '\n']
+        best_break = max_len
+
+        # Find the last natural break before max_len
+        for char in break_chars:
+            idx = text.rfind(char, 0, max_len)
+            if idx != -1 and idx > max_len * 0.6:  # At least 60% of content
+                best_break = idx + len(char)
+                break
+
+        # If no good break found, break at word boundary
+        if best_break == max_len:
+            space_idx = text.rfind(' ', 0, max_len)
+            if space_idx > max_len * 0.6:
+                best_break = space_idx
+
+        return text[:best_break].strip() + "..."
+
+    def _compress_to_shorthand(self, text: str) -> str:
+        """Compress text using intelligent shorthand while preserving meaning.
+
+        Uses common abbreviations and removes filler words.
+        """
+        # Common abbreviations
+        abbrevs = {
+            'function': 'fn',
+            'variable': 'var',
+            'parameter': 'param',
+            'configuration': 'config',
+            'application': 'app',
+            'directory': 'dir',
+            'repository': 'repo',
+            'environment': 'env',
+            'development': 'dev',
+            'production': 'prod',
+            'authentication': 'auth',
+            'authorization': 'authz',
+            'database': 'db',
+            'information': 'info',
+            'documentation': 'docs',
+            'implementation': 'impl',
+            'specification': 'spec',
+            'requirements': 'reqs',
+            'dependencies': 'deps',
+            'dependency': 'dep',
+            'component': 'comp',
+            'components': 'comps',
+            'interface': 'iface',
+            'initialize': 'init',
+            'initialization': 'init',
+            'administrator': 'admin',
+            'management': 'mgmt',
+            'message': 'msg',
+            'messages': 'msgs',
+            'response': 'resp',
+            'request': 'req',
+            'execute': 'exec',
+            'command': 'cmd',
+            'commands': 'cmds',
+            'reference': 'ref',
+            'attribute': 'attr',
+            'attributes': 'attrs',
+            'property': 'prop',
+            'properties': 'props',
+            'expression': 'expr',
+            'argument': 'arg',
+            'arguments': 'args',
+            'maximum': 'max',
+            'minimum': 'min',
+            'number': 'num',
+            'string': 'str',
+            'integer': 'int',
+            'boolean': 'bool',
+            'character': 'char',
+            'temporary': 'tmp',
+            'source': 'src',
+            'destination': 'dest',
+            'previous': 'prev',
+            'current': 'curr',
+            'original': 'orig',
+            'package': 'pkg',
+            'packages': 'pkgs',
+            'version': 'ver',
+            'utility': 'util',
+            'utilities': 'utils',
+            'library': 'lib',
+            'libraries': 'libs',
+            'object': 'obj',
+            'objects': 'objs',
+            'index': 'idx',
+            'buffer': 'buf',
+            'buffer': 'buf',
+            'context': 'ctx',
+            'navigation': 'nav',
+            'button': 'btn',
+            'image': 'img',
+            'javascript': 'JS',
+            'typescript': 'TS',
+            'python': 'py',
+            'because': 'b/c',
+            'without': 'w/o',
+            'with': 'w/',
+            'approximately': '~',
+            'greater than': '>',
+            'less than': '<',
+        }
+
+        # Filler words to remove (carefully - only when they don't add meaning)
+        filler_words = [
+            'actually', 'basically', 'essentially', 'literally',
+            'just', 'simply', 'really', 'very', 'quite',
+        ]
+
+        result = text
+
+        # Apply abbreviations (case-insensitive, preserve casing)
+        for full, short in abbrevs.items():
+            pattern = re.compile(re.escape(full), re.IGNORECASE)
+            result = pattern.sub(short, result)
+
+        # Remove filler words (only at word boundaries)
+        for filler in filler_words:
+            pattern = re.compile(r'\b' + filler + r'\b\s*', re.IGNORECASE)
+            result = pattern.sub('', result)
+
+        # Clean up multiple spaces
+        result = re.sub(r'\s+', ' ', result).strip()
+
+        return result
 
     def detect_signals(self, text: str) -> Dict[str, bool]:
         """Detect which semantic signals are present in the text."""
@@ -134,7 +351,11 @@ class MemoryExtractor:
         }
 
     def calculate_importance(self, text: str) -> int:
-        """Calculate importance score (0-10) based on signals present."""
+        """Calculate importance score (0-10) based on signals present.
+
+        Now includes adaptive learning: user-specific emphasized words
+        boost the importance score.
+        """
         signals = self.detect_signals(text)
         score = 0
 
@@ -153,6 +374,15 @@ class MemoryExtractor:
             score += 1  # New knowledge
         if signals['best_practice']:
             score += 1  # Worth following
+
+        # Adaptive learning boost: check for learned signal words
+        if self.bm:
+            words = text.lower().split()
+            for word in words:
+                word = re.sub(r'[^\w]', '', word)
+                learned_score = self.bm.get_signal_score(word)
+                if learned_score > 0:
+                    score += min(learned_score, 2)  # Cap per-word boost
 
         return min(score, 10)
 
@@ -173,9 +403,11 @@ class MemoryExtractor:
             for match in matches:
                 need = match.group(1).strip()
                 if len(need) > 10:
+                    # Smart truncation: preserve complete sentences/phrases
+                    truncated = self._smart_truncate(need, max_len=500)
                     needs.append({
                         'type': 'user_need',
-                        'need': need[:200],
+                        'need': truncated,
                         'tags': self.extract_tags(need),
                         'importance': self.calculate_importance(text)
                     })
@@ -199,9 +431,11 @@ class MemoryExtractor:
             for match in matches:
                 item = match.group(1).strip()
                 if len(item) > 10:
+                    # Smart truncation with larger limit for forgotten items (high value)
+                    truncated = self._smart_truncate(item, max_len=600)
                     forgotten.append({
                         'type': 'forgotten_item',
-                        'description': item[:200],
+                        'description': truncated,
                         'tags': self.extract_tags(item),
                         'importance': 10  # High priority - should have been remembered!
                     })
@@ -223,9 +457,11 @@ class MemoryExtractor:
             for match in matches:
                 solution = match.group(1).strip() if match.groups() else ""
                 if len(solution) > 10:
+                    # Larger limit for confirmed solutions - they're valuable
+                    truncated = self._smart_truncate(solution, max_len=800)
                     confirmed.append({
                         'type': 'confirmed_solution',
-                        'solution': solution[:300],
+                        'solution': truncated,
                         'tags': self.extract_tags(solution),
                         'importance': 8  # High value - confirmed working
                     })
@@ -253,16 +489,18 @@ class MemoryExtractor:
                 solution_text = match.group(1).strip() if match.groups() else match.group(0).strip()
                 if len(solution_text) > 20:  # Filter out too short matches
                     # Try to find context (what problem this solves)
-                    context_start = max(0, match.start() - 200)
+                    context_start = max(0, match.start() - 300)
                     context = text[context_start:match.start()].strip()
 
                     # Extract a problem description from context
                     problem = self._extract_problem(context) or "General solution"
+                    problem = self._smart_truncate(problem, max_len=300)
+                    solution_truncated = self._smart_truncate(solution_text, max_len=800)
 
                     solutions.append({
                         'type': 'solution',
-                        'problem': problem[:200],
-                        'solution': solution_text[:500],
+                        'problem': problem,
+                        'solution': solution_truncated,
                         'tags': self.extract_tags(text[context_start:match.end()])
                     })
 
@@ -278,14 +516,16 @@ class MemoryExtractor:
                 error_msg = match.group(1).strip() if match.groups() else match.group(0).strip()
 
                 # Look for resolution after the error
-                after_error = text[match.end():match.end() + 500]
+                after_error = text[match.end():match.end() + 800]
                 resolution = self._extract_resolution(after_error)
 
                 if resolution and len(error_msg) > 10:
+                    error_truncated = self._smart_truncate(error_msg, max_len=400)
+                    resolution_truncated = self._smart_truncate(resolution, max_len=800)
                     errors.append({
                         'type': 'error',
-                        'error_message': error_msg[:200],
-                        'resolution': resolution[:500],
+                        'error_message': error_truncated,
+                        'resolution': resolution_truncated,
                         'tags': self.extract_tags(error_msg + " " + resolution)
                     })
 
@@ -301,16 +541,19 @@ class MemoryExtractor:
                 bad_pattern = match.group(1).strip()
 
                 # Look for the reason and alternative
-                context = text[match.start():match.end() + 300]
+                context = text[match.start():match.end() + 500]
                 reason = self._extract_reason(context)
                 alternative = self._extract_alternative(context)
 
                 if len(bad_pattern) > 10 and (reason or alternative):
+                    pattern_truncated = self._smart_truncate(bad_pattern, max_len=300)
+                    reason_truncated = self._smart_truncate(reason, max_len=300) if reason else "Not recommended"
+                    alt_truncated = self._smart_truncate(alternative, max_len=300) if alternative else "See context"
                     antipatterns.append({
                         'type': 'antipattern',
-                        'pattern': bad_pattern[:200],
-                        'reason': reason or "Not recommended",
-                        'alternative': alternative or "See context",
+                        'pattern': pattern_truncated,
+                        'reason': reason_truncated,
+                        'alternative': alt_truncated,
                         'tags': self.extract_tags(context)
                     })
 
@@ -373,15 +616,21 @@ class MemoryExtractor:
 
 
 class AutoConcentrator:
-    """Automatically concentrates memories from conversations."""
+    """Automatically concentrates memories from conversations.
+
+    Includes adaptive learning to improve memory extraction over time.
+    """
 
     def __init__(self, project_path: str = None, storage_mode: str = 'auto'):
         self.project_path = Path(project_path) if project_path else Path.cwd()
         self.bm = BerryManager(storage_mode=storage_mode, project_path=str(self.project_path))
-        self.extractor = MemoryExtractor()
+        # Pass BerryManager to extractor for adaptive learning
+        self.extractor = MemoryExtractor(berry_manager=self.bm)
 
     def process_transcript(self, transcript_path: str, last_n_messages: int = 5) -> List[Dict]:
         """Process a Claude Code transcript file and extract memories.
+
+        Also learns from user's communication patterns to improve future extraction.
 
         Args:
             transcript_path: Path to the .jsonl transcript file
@@ -401,7 +650,7 @@ class AutoConcentrator:
                 for line in f:
                     if line.strip():
                         messages.append(json.loads(line))
-        except Exception as e:
+        except Exception:
             return []
 
         # Get the last N messages
@@ -410,16 +659,27 @@ class AutoConcentrator:
         # Extract text content from messages
         conversation_text = self._extract_text_from_messages(recent_messages)
 
+        # Learn from the user's communication patterns
+        self.extractor.learn_from_text(conversation_text)
+
         # Extract memories
         extracted = self.extractor.extract_all(conversation_text)
 
         # Store extracted memories
         stored = self._store_memories(extracted)
 
+        # Record effective signals when memories are successfully extracted
+        if stored:
+            emphasized = self.extractor.detect_emphasis_patterns(conversation_text)
+            for word in emphasized[:5]:
+                self.bm.record_effective_signal(word)
+
         return stored
 
     def process_text(self, text: str) -> List[Dict]:
         """Process raw text and extract memories.
+
+        Also learns from user's communication patterns to improve future extraction.
 
         Args:
             text: Conversation text to analyze
@@ -427,8 +687,19 @@ class AutoConcentrator:
         Returns:
             List of extracted and stored memories
         """
+        # Learn from the user's communication patterns
+        self.extractor.learn_from_text(text)
+
+        # Extract and store memories
         extracted = self.extractor.extract_all(text)
         stored = self._store_memories(extracted)
+
+        # Record effective signals when memories are successfully extracted
+        if stored:
+            emphasized = self.extractor.detect_emphasis_patterns(text)
+            for word in emphasized[:5]:  # Limit to top 5
+                self.bm.record_effective_signal(word)
+
         return stored
 
     def _extract_text_from_messages(self, messages: List[Dict]) -> str:
@@ -457,18 +728,48 @@ class AutoConcentrator:
         return "\n\n".join(texts)
 
     def _store_memories(self, memories: List[Dict]) -> List[Dict]:
-        """Store extracted memories in the berry manager."""
+        """Store extracted memories in the berry manager.
+
+        Now includes:
+        - Auto-pinning of credentials/configs
+        - Automatic task clustering based on tags
+        """
         stored = []
 
         for memory in memories:
             try:
+                # Check for auto-pin patterns in any memory content
+                content_to_check = ""
                 if memory['type'] == 'solution':
-                    self.bm.add_solution(
+                    content_to_check = f"{memory['problem']} {memory['solution']}"
+                elif memory['type'] == 'error':
+                    content_to_check = f"{memory['error_message']} {memory['resolution']}"
+                elif memory['type'] == 'confirmed_solution':
+                    content_to_check = memory.get('solution', '')
+
+                # Auto-pin if credentials/configs detected
+                if content_to_check:
+                    pin_result = self.bm.auto_pin_if_needed(
+                        content_to_check,
+                        name_hint=memory.get('problem', memory.get('type', 'Auto-detected'))[:50]
+                    )
+                    if pin_result:
+                        memory['_auto_pinned'] = True
+
+                if memory['type'] == 'solution':
+                    result = self.bm.add_solution(
                         problem=memory['problem'],
                         solution=memory['solution'],
                         tags=memory.get('tags', []),
                         code_snippet=None
                     )
+                    # Auto-cluster based on tags
+                    if result and result.get('id'):
+                        self.bm.auto_cluster_memory(
+                            result['id'],
+                            memory.get('tags', []),
+                            f"{memory['problem']} {memory['solution']}"
+                        )
                     stored.append(memory)
 
                 elif memory['type'] == 'error':
