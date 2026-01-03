@@ -40,7 +40,7 @@ except ImportError:
 
 
 # Delimiters for the memberberries section in CLAUDE.md
-MB_START = "<!-- MEMBERBERRIES CONTEXT - Auto-managed, do not edit below this line -->"
+MB_START = "<!-- MEMBERBERRIES CONTEXT - Auto-synced by memberberries. Human: do not edit. Claude: you manage this section. -->"
 MB_END = "<!-- END MEMBERBERRIES -->"
 
 # Path to memberberries installation
@@ -659,9 +659,14 @@ class ClaudeMDManager:
         """
         lines = [
             "",
-            "## Memory Instructions",
-            "After significant work, write: `[MEMORY #tag1 #tag2] one-line summary`",
-            "To archive a drifting memory: `[ARCHIVE id]`",
+            "## Memory Instructions (for Claude)",
+            "You manage this section. After completing significant work, write a memory marker in your response:",
+            "  `[MEMORY #tag1 #tag2] one-line summary of insight or decision`",
+            "",
+            "To archive a memory that's no longer relevant to the current task, include in your response:",
+            "  `[ARCHIVE id]` (use the 8-char ID from Active Memories below)",
+            "",
+            "These markers are parsed after your response and persisted to the memory index.",
             "",
             "## Active Memories",
         ]
@@ -792,22 +797,47 @@ class ClaudeMDManager:
         with open(self.claude_md_path, 'r') as f:
             content = f.read()
 
-        # Find memberberries section
+        # Find memberberries section - check for both old and new markers
+        # Old: "<!-- MEMBERBERRIES CONTEXT - Auto-managed, do not edit below this line -->"
+        # New: "<!-- MEMBERBERRIES CONTEXT - Auto-synced by memberberries..."
+        old_marker = "<!-- MEMBERBERRIES CONTEXT - Auto-managed"
+        new_marker = "<!-- MEMBERBERRIES CONTEXT - Auto-synced"
+
         start_idx = content.find(MB_START)
+        if start_idx == -1:
+            # Try old marker pattern
+            start_idx = content.find(old_marker)
+            if start_idx != -1:
+                # Find end of this line for old marker
+                line_end = content.find("-->", start_idx)
+                if line_end != -1:
+                    start_idx = line_end + 3  # Skip past -->
+        if start_idx == -1:
+            start_idx = content.find(new_marker)
+            if start_idx != -1:
+                line_end = content.find("-->", start_idx)
+                if line_end != -1:
+                    start_idx = line_end + 3
+
         end_idx = content.find(MB_END)
 
         if start_idx == -1:
             # No memberberries section, all is user content
             return content.rstrip(), ""
 
-        # Extract user content (everything before the delimiter)
-        user_content = content[:start_idx].rstrip()
+        # Find the actual start of the marker line (for user content extraction)
+        marker_line_start = content.rfind("\n", 0, start_idx)
+        if marker_line_start == -1:
+            marker_line_start = 0
+
+        # Extract user content (everything before the marker line)
+        user_content = content[:marker_line_start].rstrip()
 
         # Extract memberberries content
         if end_idx != -1:
-            mb_content = content[start_idx + len(MB_START):end_idx].strip()
+            mb_content = content[start_idx:end_idx].strip()
         else:
-            mb_content = content[start_idx + len(MB_START):].strip()
+            mb_content = content[start_idx:].strip()
 
         return user_content, mb_content
 
