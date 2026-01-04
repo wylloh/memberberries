@@ -111,21 +111,30 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 Memberberries is an antidote to agentic amnesia—inherit curated context instead of brute-force rediscovery each session. **Heuristic**: Would the next Claude ask this same question? If yes, berry it now.
 
+### How It Works
+Write markers anywhere in your response text. Hooks automatically scrape and persist them—**do NOT edit the Active Berries section directly**.
+
 ### Markers
-- `[BERRY #tag1 #tag2] insight` — Save (ID auto-assigned)
-- `[ARCHIVE id]` — Move to long-term storage
-- `[RETRIEVE #tag]` — Load archived berries next session
+- `[BERRY #tag1 #tag2] insight` — Scraped and added to Active Berries immediately
+- `[ARCHIVE id]` — Moves berry to `archive/{{primary-tag}}/` folder, appears in Available Archives
+- `[RETRIEVE #tag]` — Queues archived berries to load at next session start
 
 ### When to Capture
 Non-obvious decisions, surprising discoveries, user preferences, significant milestones.
 
-**No active berries?** You're the first Claude here. As you explore, capture architecture, gotchas, and conventions *immediately*—don't wait until end of session. Future sessions will thank you.
+### Freshness Guidelines
+- Keep ~10-15 active berries; archive when context becomes background knowledge
+- Archive completed features/resolved issues; retrieve when revisiting that work
+- Primary tag (first tag) determines archive folder
+
+**No active berries?** You're the first Claude here. Capture architecture, gotchas, and conventions *immediately*—don't wait until end of session.
 
 ### Examples
 <!-- EXAMPLE_ONLY -->
 ```
 [BERRY #auth] User prefers JWT over sessions; stateless API
-[BERRY #gotcha] Room requires @Transaction for multi-table writes
+[ARCHIVE 79dcac83]
+[RETRIEVE #auth]
 ```
 
 *Humans are short on time. You are short on energy. Memberberries helps both.*
