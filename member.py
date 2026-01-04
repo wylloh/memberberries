@@ -109,7 +109,7 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 ## Memberberries (Claude's Active Memory)
 
-Memberberries is an antidote to agentic amnesia—inherit curated context instead of brute-force rediscovery each session. **Heuristic**: If rediscovering this would cost 1000+ tokens of exploration, berry it.
+Memberberries is an antidote to agentic amnesia—inherit curated context instead of brute-force rediscovery each session. **Heuristic**: Would the next Claude ask this same question? If yes, berry it now.
 
 ### Markers
 - `[BERRY #tag1 #tag2] insight` — Save (ID auto-assigned)
@@ -117,7 +117,9 @@ Memberberries is an antidote to agentic amnesia—inherit curated context instea
 - `[RETRIEVE #tag]` — Load archived berries next session
 
 ### When to Capture
-Non-obvious decisions, surprising discoveries, user preferences, significant milestones. **Fresh project?** First session builds the most tribal knowledge—capture liberally.
+Non-obvious decisions, surprising discoveries, user preferences, significant milestones.
+
+**No active berries?** You're the first Claude here. As you explore, capture architecture, gotchas, and conventions *immediately*—don't wait until end of session. Future sessions will thank you.
 
 ### Examples
 <!-- EXAMPLE_ONLY -->
@@ -408,6 +410,38 @@ def cmd_launch(args):
     os.execvp("claude", ["claude"])
 
 
+def cmd_upgrade(args):
+    """Pull latest memberberries and re-sync CLAUDE.md template (preserves berries)."""
+    import subprocess
+
+    # Find memberberries installation directory
+    memberberries_dir = Path(__file__).parent.resolve()
+    project_path = Path(args.project) if args.project else Path.cwd()
+
+    print(f"Upgrading memberberries from: {memberberries_dir}")
+
+    # Git pull in memberberries directory
+    try:
+        result = subprocess.run(
+            ["git", "pull"],
+            cwd=memberberries_dir,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print(f"✓ {result.stdout.strip()}")
+        else:
+            print(f"✗ Git pull failed: {result.stderr}")
+            return
+    except Exception as e:
+        print(f"✗ Could not update: {e}")
+        return
+
+    # Re-sync to apply new template
+    count = sync_claude_md(project_path)
+    print(f"🫐 Re-synced {count} berries with latest template")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Memberberries - Persistent memory for Claude Code',
@@ -415,7 +449,7 @@ def main():
     )
 
     parser.add_argument('command', nargs='?', default='launch',
-                       choices=['launch', 'setup', 'status', 'sync'],
+                       choices=['launch', 'setup', 'status', 'sync', 'upgrade'],
                        help='Command to run')
     parser.add_argument('--project', '-p', help='Project path')
     parser.add_argument('--query', '-q', help='Search query for context')
@@ -437,6 +471,8 @@ def main():
         cmd_status(args)
     elif args.command == 'sync':
         cmd_sync(args)
+    elif args.command == 'upgrade':
+        cmd_upgrade(args)
     else:
         cmd_launch(args)
 

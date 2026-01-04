@@ -81,6 +81,7 @@ Everything is JSON. No black boxes.
 | `member setup` | Configure hooks for project |
 | `member status` | Berry counts, hook health |
 | `member sync` | Sync only, don't launch |
+| `member upgrade` | Pull latest memberberries, re-sync template (preserves berries) |
 
 ## Requirements
 
