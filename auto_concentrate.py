@@ -984,12 +984,17 @@ class AutoConcentrator:
 
         for msg in messages:
             if isinstance(msg, dict):
-                role = msg.get('role', 'user')
+                # Handle nested message structure (Claude Code transcripts)
+                message = msg.get('message', msg)  # Fall back to msg itself if no 'message' key
+                if not isinstance(message, dict):
+                    continue
+
+                role = message.get('role', 'user')
                 content_text = ""
 
                 # Try common message structures
-                if 'content' in msg:
-                    content = msg['content']
+                if 'content' in message:
+                    content = message['content']
                     if isinstance(content, str):
                         content_text = content
                     elif isinstance(content, list):
@@ -998,10 +1003,8 @@ class AutoConcentrator:
                                 content_text += item['text'] + "\n"
                             elif isinstance(item, str):
                                 content_text += item + "\n"
-                elif 'text' in msg:
-                    content_text = msg['text']
-                elif 'message' in msg:
-                    content_text = str(msg['message'])
+                elif 'text' in message:
+                    content_text = message['text']
 
                 # Sort by role
                 if role == 'assistant':
@@ -1251,16 +1254,20 @@ class AutoConcentrator:
             return {'memories': 0, 'archives': 0}
 
         # Extract assistant responses
+        # Claude Code transcripts nest messages inside msg['message']
         assistant_texts = []
         for msg in messages:
-            if isinstance(msg, dict) and msg.get('role') == 'assistant':
-                content = msg.get('content', '')
-                if isinstance(content, str):
-                    assistant_texts.append(content)
-                elif isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, dict) and 'text' in item:
-                            assistant_texts.append(item['text'])
+            if isinstance(msg, dict):
+                # Handle nested message structure (Claude Code transcripts)
+                message = msg.get('message', msg)  # Fall back to msg itself if no 'message' key
+                if isinstance(message, dict) and message.get('role') == 'assistant':
+                    content = message.get('content', '')
+                    if isinstance(content, str):
+                        assistant_texts.append(content)
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and 'text' in item:
+                                assistant_texts.append(item['text'])
 
         full_text = "\n\n".join(assistant_texts)
 
