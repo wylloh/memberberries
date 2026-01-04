@@ -414,8 +414,8 @@ def cmd_upgrade(args):
     """Pull latest memberberries and re-sync CLAUDE.md template (preserves berries)."""
     import subprocess
 
-    # Find memberberries installation directory
-    memberberries_dir = Path(__file__).parent.resolve()
+    # Find memberberries installation directory (resolve symlinks first)
+    memberberries_dir = Path(__file__).resolve().parent
     project_path = Path(args.project) if args.project else Path.cwd()
 
     print(f"Upgrading memberberries from: {memberberries_dir}")
