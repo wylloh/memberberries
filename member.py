@@ -119,8 +119,13 @@ Write markers anywhere in your response text. Hooks automatically scrape and per
 - `[ARCHIVE id]` — Moves berry to `archive/{{primary-tag}}/` folder, appears in Available Archives
 - `[RETRIEVE #tag]` — Queues archived berries to load at next session start
 
-### When to Capture
-Non-obvious decisions, surprising discoveries, user preferences, significant milestones.
+### When to Capture (Triggers)
+Berry **in the moment**—not as cleanup. Pause and write a marker when you:
+- Discover a file/component is critical or safe to delete
+- Find a non-obvious dependency or integration point
+- Learn a user preference or workflow constraint
+- Uncover *why* something was built a certain way
+- Realize the next Claude would ask the same question you just answered
 
 ### Freshness Guidelines
 - Keep ~10-15 active berries; archive when context becomes background knowledge
@@ -288,6 +293,27 @@ exit 0
     concentrate_script.write_text(concentrate_content)
     os.chmod(concentrate_script, 0o755)
 
+    # Create nudge hook (gentle reminder after substantive responses)
+    nudge_script = hooks_dir / "berry-nudge.sh"
+    nudge_content = f'''#!/bin/bash
+# Memberberries nudge hook - gentle reminder after substantive responses
+
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
+
+if [ -z "$TRANSCRIPT" ]; then
+  exit 0
+fi
+
+NUDGE=$(python3 "{MEMBERBERRIES_DIR}/berry_nudge.py" "$TRANSCRIPT" 2>/dev/null)
+if [ -n "$NUDGE" ]; then
+  echo "$NUDGE"
+fi
+exit 0
+'''
+    nudge_script.write_text(nudge_content)
+    os.chmod(nudge_script, 0o755)
+
     # Update settings.json
     settings = {}
     if settings_file.exists():
@@ -301,7 +327,10 @@ exit 0
             "hooks": [{"type": "command", "command": str(sync_script)}]
         }],
         "Stop": [{
-            "hooks": [{"type": "command", "command": str(concentrate_script)}]
+            "hooks": [
+                {"type": "command", "command": str(concentrate_script)},
+                {"type": "command", "command": str(nudge_script)}
+            ]
         }]
     }
 
