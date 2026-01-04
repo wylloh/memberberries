@@ -37,16 +37,8 @@ env/
 .DS_Store
 Thumbs.db
 
-# Memberberries data (user-specific)
-preferences/
-projects/
-solutions/
-sessions/
-{preferences,projects,solutions,sessions}/
-
-# Embeddings cache
-*.npy
-embeddings_cache/
+# Memberberries data (may contain sensitive info)
+.memberberries/
 
 # Claude Code hooks (user-specific)
 .claude/

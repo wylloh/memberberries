@@ -50,12 +50,23 @@ def extract_assistant_text(transcript_path: Path) -> str:
     return last_assistant_text
 
 
+def strip_code_blocks(text: str) -> str:
+    """Remove fenced code blocks to avoid capturing example markers."""
+    # Remove fenced code blocks (``` ... ```)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    # Remove inline code (`...`)
+    text = re.sub(r'`[^`\n]+`', '', text)
+    return text
+
+
 def parse_berry_markers(text: str) -> List[Dict]:
     """Parse [BERRY #tag1 #tag2] summary patterns."""
+    # Strip code blocks to avoid capturing documentation examples
+    text = strip_code_blocks(text)
+
     # Support both [BERRY] and legacy [MEMORY]
-    # Negative lookbehind (?<!`) excludes markers inside backticks (documentation examples)
-    # Summary captures until newline, excluding backticks
-    pattern = r'(?<!`)\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^`\n]+)'
+    # Summary captures until newline
+    pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^\n]+)'
     matches = re.finditer(pattern, text, re.IGNORECASE)
 
     berries = []

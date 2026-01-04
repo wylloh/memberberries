@@ -21,8 +21,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 
-# Directory where memberberries is installed
-MEMBERBERRIES_DIR = Path(__file__).parent.resolve()
+# Directory where memberberries is installed (resolve symlinks to get actual location)
+MEMBERBERRIES_DIR = Path(__file__).resolve().parent
 
 
 # =============================================================================
@@ -100,15 +100,33 @@ CLAUDE_MD_TEMPLATE = '''# {project_name}
 
 ---
 
+**DO NOT EDIT BELOW THIS LINE** — This section is automatically managed by Memberberries.
+
 {memberberries_section}
 '''
 
 MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
-## Berry Instructions
-Write `[BERRY #tag1 #tag2] one-line insight` to save a berry.
-Write `[ARCHIVE id]` to archive a berry.
-Write `[RETRIEVE #tag]` to pull archived berries into context.
+## Memberberries (Claude's Active Memory)
+
+Memberberries is an antidote to agentic amnesia—inherit curated context instead of brute-force rediscovery each session. **Heuristic**: If rediscovering this would cost 1000+ tokens of exploration, berry it.
+
+### Markers
+- `[BERRY #tag1 #tag2] insight` — Save (ID auto-assigned)
+- `[ARCHIVE id]` — Move to long-term storage
+- `[RETRIEVE #tag]` — Load archived berries next session
+
+### When to Capture
+Non-obvious decisions, surprising discoveries, user preferences, significant milestones. **Fresh project?** First session builds the most tribal knowledge—capture liberally.
+
+### Examples
+<!-- EXAMPLE_ONLY -->
+```
+[BERRY #auth] User prefers JWT over sessions; stateless API
+[BERRY #gotcha] Room requires @Transaction for multi-table writes
+```
+
+*Humans are short on time. You are short on energy. Memberberries helps both.*
 
 ## Active Berries
 {active_berries}
