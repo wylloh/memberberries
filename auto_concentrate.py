@@ -16,11 +16,15 @@ from typing import List, Dict
 
 
 def extract_assistant_text(transcript_path: Path) -> str:
-    """Extract all assistant response text from a Claude Code transcript."""
+    """Extract the LAST assistant response from a Claude Code transcript.
+
+    Only processing the last message prevents re-capturing markers from
+    earlier in the conversation on every hook invocation.
+    """
     if not transcript_path.exists():
         return ""
 
-    texts = []
+    last_assistant_text = ""
     try:
         with open(transcript_path, 'r') as f:
             for line in f:
@@ -31,22 +35,27 @@ def extract_assistant_text(transcript_path: Path) -> str:
                 message = msg.get('message', msg)
                 if isinstance(message, dict) and message.get('role') == 'assistant':
                     content = message.get('content', '')
+                    texts = []
                     if isinstance(content, str):
                         texts.append(content)
                     elif isinstance(content, list):
                         for item in content:
                             if isinstance(item, dict) and 'text' in item:
                                 texts.append(item['text'])
+                    if texts:
+                        last_assistant_text = "\n\n".join(texts)
     except Exception:
         return ""
 
-    return "\n\n".join(texts)
+    return last_assistant_text
 
 
 def parse_berry_markers(text: str) -> List[Dict]:
     """Parse [BERRY #tag1 #tag2] summary patterns."""
     # Support both [BERRY] and legacy [MEMORY]
-    pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*(.+?)(?:\n|$)'
+    # Negative lookbehind (?<!`) excludes markers inside backticks (documentation examples)
+    # Summary captures until newline, excluding backticks
+    pattern = r'(?<!`)\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^`\n]+)'
     matches = re.finditer(pattern, text, re.IGNORECASE)
 
     berries = []
@@ -132,10 +141,13 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
     # Load current active berries
     active = load_active(project_path)
     active_by_id = {b['id']: b for b in active}
+    existing_summaries = {b.get('summary', '') for b in active}
 
-    # Add new berries
+    # Add new berries (skip duplicates by summary)
     for berry in new_berries:
-        active.append(berry)
+        if berry['summary'] not in existing_summaries:
+            active.append(berry)
+            existing_summaries.add(berry['summary'])
 
     # Archive requested berries
     archived_count = 0
