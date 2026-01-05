@@ -126,33 +126,49 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 ## Memberberries
 
-Persistent memory across sessions. Write markers in responses—hooks persist them automatically.
+**You lose memory between sessions. Berries let you leave notes for your next self.**
+
+The Active Berries below are insights your past self preserved. When you discover something through effort—a gotcha, a preference, how things connect—berry it so the next Claude skips the re-discovery.
 
 ### Markers
-| Marker | Effect |
-|--------|--------|
-| `[BERRY #tag] insight` | Adds to Active Berries (knowledge) |
-| `[ARCHIVE id]` | Moves berry to archive by primary tag |
-| `[RETRIEVE #tag]` | Loads archived berries next session |
-| `[AUTOBERRY] state` | Saves checkpoint below (overwrites previous) |
+Write in responses. Hooks persist automatically.
 
-### When to Write
-**Berries** — when the next Claude would ask the same question:
-- Critical files, dependencies, user preferences, architectural decisions
+| Marker | Effect | Why use it |
+|--------|--------|------------|
+| `[BERRY #tag] insight` | Saves to Active Berries | Skip re-deriving this next session |
+| `[ARCHIVE id]` | Moves to archive folder | Declutter active; still retrievable |
+| `[RETRIEVE #tag]` | Loads archived berries | Pull back context when relevant |
+| `[AUTOBERRY] state` | Saves checkpoint below | Resume mid-task next session |
 
-**Autoberries** — to preserve task state:
-- On `⏰` prompt, `member save`, or before complex work
-- Format: `[AUTOBERRY] <goal> | <progress> | <next>`
+### When to Berry
+**Trigger:** "I just spent effort learning something not obvious from the code."
 
-**Archive** — when a berry becomes background knowledge:
-- Feature complete, issue resolved, or context no longer active
-- Keeps Active Berries lean; archived berries retrievable by tag
+Examples worth capturing:
+- User preferences: `[BERRY #pref] User prefers JWT over sessions`
+- Gotchas you hit: `[BERRY #gotcha] Must run X before Y or tests fail`
+- Non-obvious connections: `[BERRY #arch] Service A calls B via queue, not directly`
+- Decisions: `[BERRY #decision] Chose X over Y because Z`
+
+**Don't berry:** File locations, function signatures, things grep finds instantly.
+
+### When to Autoberry
+**Format:** `[AUTOBERRY] <goal> | <progress> | <next step>`
+
+Good: `[AUTOBERRY] Refactoring auth | Extracted middleware, 3/5 tests passing | Fix remaining 2 test failures`
+Bad: `[AUTOBERRY] Working on auth stuff`
+
+Write on: `⏰` prompt, `member save`, before context switches, or every ~30min of complex work.
+
+### When to Archive
+Archive when a unit of work completes: feature shipped, bug resolved, exploration done.
+
+**Rule:** If you wouldn't consult it daily, archive it. `[ARCHIVE 79dcac83]`
 
 ### On Session Start
-1. **Checkpoint exists?** → Acknowledge and continue from that state
-2. **Check Archives** → Does user's task relate to an archived tag? `[RETRIEVE #tag]`
-3. **Read Active Berries** → Absorb current project context
-4. **No berries?** → First session; capture architecture and conventions now
+1. **Checkpoint below?** → You were mid-task. Continue from there.
+2. **Read Active Berries** → Past you's discoveries. Absorb them.
+3. **Task relates to archived tag?** → `[RETRIEVE #tag]` to pull it back.
+4. **No berries?** → First session! Capture architecture and conventions now—future you will thank you.
 
 ---
 
