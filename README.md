@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Memberberries.png" alt="Memberberries Logo" width="100">
+</p>
+
 # Memberberries
 
 Persistent memory for Claude Code sessions.
