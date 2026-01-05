@@ -137,18 +137,22 @@ Persistent memory across sessions. Write markers in responses—hooks persist th
 | `[AUTOBERRY] state` | Saves checkpoint below (overwrites previous) |
 
 ### When to Write
-**Berries** (knowledge) — capture when the next Claude would ask the same question:
-- Critical files, non-obvious dependencies, user preferences, why something was built a certain way
+**Berries** — when the next Claude would ask the same question:
+- Critical files, dependencies, user preferences, architectural decisions
 
-**Autoberries** (task state) — capture current work to resume later:
-- When you see `⏰` prompt or user runs `member save`
-- Before complex multi-step work
-- Format: `[AUTOBERRY] <goal> | <progress> | <next steps>`
+**Autoberries** — to preserve task state:
+- On `⏰` prompt, `member save`, or before complex work
+- Format: `[AUTOBERRY] <goal> | <progress> | <next>`
+
+**Archive** — when a berry becomes background knowledge:
+- Feature complete, issue resolved, or context no longer active
+- Keeps Active Berries lean; archived berries retrievable by tag
 
 ### On Session Start
 1. **Checkpoint exists?** → Acknowledge and continue from that state
-2. **No checkpoint?** → Starting fresh; read Active Berries for context
-3. **No berries?** → First session; capture architecture and conventions now
+2. **Check Archives** → Does user's task relate to an archived tag? `[RETRIEVE #tag]`
+3. **Read Active Berries** → Absorb current project context
+4. **No berries?** → First session; capture architecture and conventions now
 
 ---
 
