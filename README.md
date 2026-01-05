@@ -26,15 +26,16 @@ member
 
 ## How It Works
 
-### Three Markers
+### Four Markers
 
 Claude writes these in responses. Hooks parse and persist them.
 
 | Marker | Effect |
 |--------|--------|
-| `[BERRY #tag1 #tag2] insight` | Save a new berry |
+| `[BERRY #tag] insight` | Save knowledge to Active Berries |
 | `[ARCHIVE id]` | Move berry to archive folder |
 | `[RETRIEVE #tag]` | Pull archived berries into context |
+| `[AUTOBERRY] state` | Save task checkpoint (overwrites previous) |
 
 ### Session Flow
 
@@ -45,17 +46,17 @@ Claude writes these in responses. Hooks parse and persist them.
 ### What Claude Sees
 
 ```markdown
-## Berry Instructions
-Write `[BERRY #tag1 #tag2] one-line insight` to save a berry.
-Write `[ARCHIVE id]` to archive a berry.
-Write `[RETRIEVE #tag]` to pull archived berries into context.
+## 📍 Checkpoint
+**[2026-01-04 15:30]** Implementing auth | Login done | Next: token refresh
+
+↳ Continue from here. Write `[AUTOBERRY]` to update.
 
 ## Active Berries
-- `a1b2c3d4` [2026-01-04] #architecture #auth: JWT in httpOnly cookies, not localStorage
+- `a1b2c3d4` [2026-01-04] #auth: JWT in httpOnly cookies, not localStorage
 - `b2c3d4e5` [2026-01-04] #debugging: Check nginx logs first for 502 errors
 
-## Available Archives
-`#architecture` (3) · `#deployment` (5) · `#debugging` (8)
+## Archives
+`#architecture` (3) · `#deployment` (5)
 ```
 
 ## Storage
@@ -81,7 +82,8 @@ Everything is JSON. No black boxes.
 | `member setup` | Configure hooks for project |
 | `member status` | Berry counts, hook health |
 | `member sync` | Sync only, don't launch |
-| `member upgrade` | Pull latest memberberries, re-sync template (preserves berries) |
+| `member save` | Prompt Claude to write a checkpoint |
+| `member upgrade` | Pull latest, update hooks and template |
 
 ## Requirements
 
@@ -90,9 +92,9 @@ Everything is JSON. No black boxes.
 
 ## Design
 
-~600 lines of Python. No numpy. No ML dependencies. Just file I/O and regex.
+~800 lines of Python. No dependencies beyond stdlib. Just file I/O and regex.
 
-The system is scaffolding for Claude to work within—structure and automation, not intelligence. Claude provides the intelligence.
+The system is scaffolding for Claude—structure and automation, not intelligence. Claude provides the intelligence.
 
 ## License
 

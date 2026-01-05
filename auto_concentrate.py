@@ -12,7 +12,7 @@ import hashlib
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 def extract_assistant_text(transcript_path: Path) -> str:
@@ -98,26 +98,71 @@ def parse_retrieve_markers(text: str) -> List[str]:
     return re.findall(pattern, text, re.IGNORECASE)
 
 
-def load_active(project_path: Path) -> List[Dict]:
-    """Load active berries from storage."""
+def parse_autoberry_marker(text: str) -> Optional[str]:
+    """Parse [AUTOBERRY] checkpoint pattern. Returns the checkpoint text or None."""
+    # Strip code blocks to avoid capturing documentation examples
+    text = strip_code_blocks(text)
+
+    # Capture everything after [AUTOBERRY] until end of line
+    pattern = r'\[AUTOBERRY\]\s*([^\n]+)'
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def load_storage(project_path: Path) -> Dict:
+    """Load storage file. Returns {"berries": [...], "autoberry": {...} or None}.
+
+    Backward compatible: if active.json is a list, migrate to new structure.
+    """
     active_file = project_path / ".memberberries" / "active.json"
     if active_file.exists():
         try:
             with open(active_file, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Backward compat: old format was just a list of berries
+            if isinstance(data, list):
+                return {"berries": data, "autoberry": None}
+            return data
         except Exception:
-            return []
-    return []
+            return {"berries": [], "autoberry": None}
+    return {"berries": [], "autoberry": None}
 
 
-def save_active(project_path: Path, berries: List[Dict]):
-    """Save active berries to storage."""
+def load_active(project_path: Path) -> List[Dict]:
+    """Load active berries from storage (convenience wrapper)."""
+    return load_storage(project_path).get("berries", [])
+
+
+def save_storage(project_path: Path, storage: Dict):
+    """Save full storage structure."""
     memberberries_dir = project_path / ".memberberries"
     memberberries_dir.mkdir(parents=True, exist_ok=True)
 
     active_file = memberberries_dir / "active.json"
     with open(active_file, 'w') as f:
-        json.dump(berries, f, indent=2)
+        json.dump(storage, f, indent=2)
+
+
+def save_active(project_path: Path, berries: List[Dict]):
+    """Save active berries to storage (preserves autoberry)."""
+    storage = load_storage(project_path)
+    storage["berries"] = berries
+    save_storage(project_path, storage)
+
+
+def save_autoberry(project_path: Path, content: str):
+    """Save or update the autoberry checkpoint."""
+    storage = load_storage(project_path)
+    storage["autoberry"] = {
+        "content": content,
+        "timestamp": datetime.now().isoformat()
+    }
+    save_storage(project_path, storage)
+
+
+def load_autoberry(project_path: Path) -> Optional[Dict]:
+    """Load current autoberry if exists."""
+    return load_storage(project_path).get("autoberry")
 
 
 def archive_berry(project_path: Path, berry: Dict):
@@ -142,12 +187,13 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
 
     text = extract_assistant_text(transcript_path)
     if not text:
-        return {'berries': 0, 'archives': 0, 'retrieves': 0}
+        return {'berries': 0, 'archives': 0, 'retrieves': 0, 'autoberry': 0}
 
     # Parse all markers
     new_berries = parse_berry_markers(text)
     archive_ids = parse_archive_markers(text)
     retrieve_tags = parse_retrieve_markers(text)
+    autoberry_content = parse_autoberry_marker(text)
 
     # Load current active berries
     active = load_active(project_path)
@@ -172,6 +218,12 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
     # Save updated active list
     save_active(project_path, active)
 
+    # Save autoberry checkpoint if present
+    autoberry_saved = 0
+    if autoberry_content:
+        save_autoberry(project_path, autoberry_content)
+        autoberry_saved = 1
+
     # Store retrieve requests for next sync
     if retrieve_tags:
         retrieve_file = project_path / ".memberberries" / "pending_retrieves.json"
@@ -181,7 +233,8 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
     return {
         'berries': len(new_berries),
         'archives': archived_count,
-        'retrieves': len(retrieve_tags)
+        'retrieves': len(retrieve_tags),
+        'autoberry': autoberry_saved
     }
 
 
@@ -197,8 +250,15 @@ def main():
     result = process_transcript(args.transcript, project_path)
 
     # Log results (visible in debug log)
-    if result['berries'] > 0 or result['archives'] > 0:
-        print(f"🫐 Processed: {result['berries']} new, {result['archives']} archived")
+    if result['berries'] > 0 or result['archives'] > 0 or result['autoberry'] > 0:
+        parts = []
+        if result['berries']:
+            parts.append(f"{result['berries']} new")
+        if result['archives']:
+            parts.append(f"{result['archives']} archived")
+        if result['autoberry']:
+            parts.append("checkpoint saved")
+        print(f"🫐 Processed: {', '.join(parts)}")
 
 
 if __name__ == '__main__':

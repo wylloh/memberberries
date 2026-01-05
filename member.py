@@ -29,16 +29,33 @@ MEMBERBERRIES_DIR = Path(__file__).resolve().parent
 # Storage Operations
 # =============================================================================
 
-def load_active_berries(project_path: Path) -> List[Dict]:
-    """Load active berries from storage."""
+def load_storage(project_path: Path) -> Dict:
+    """Load storage file. Returns {"berries": [...], "autoberry": {...} or None}.
+
+    Backward compatible: if active.json is a list, migrate to new structure.
+    """
     active_file = project_path / ".memberberries" / "active.json"
     if active_file.exists():
         try:
             with open(active_file, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Backward compat: old format was just a list of berries
+            if isinstance(data, list):
+                return {"berries": data, "autoberry": None}
+            return data
         except Exception:
-            return []
-    return []
+            return {"berries": [], "autoberry": None}
+    return {"berries": [], "autoberry": None}
+
+
+def load_active_berries(project_path: Path) -> List[Dict]:
+    """Load active berries from storage."""
+    return load_storage(project_path).get("berries", [])
+
+
+def load_autoberry(project_path: Path) -> Optional[Dict]:
+    """Load current autoberry checkpoint if exists."""
+    return load_storage(project_path).get("autoberry")
 
 
 def get_archive_summary(project_path: Path) -> Dict[str, int]:
@@ -107,52 +124,42 @@ CLAUDE_MD_TEMPLATE = '''# {project_name}
 
 MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
-## Memberberries (Claude's Active Memory)
+## Memberberries
 
-Memberberries is an antidote to agentic amnesia—inherit curated context instead of brute-force rediscovery each session. **Heuristic**: Would the next Claude ask this same question? If yes, berry it now.
-
-### How It Works
-Write markers anywhere in your response text. Hooks automatically scrape and persist them—**do NOT edit the Active Berries section directly**.
+Persistent memory across sessions. Write markers in responses—hooks persist them automatically.
 
 ### Markers
-- `[BERRY #tag1 #tag2] insight` — Scraped and added to Active Berries immediately
-- `[ARCHIVE id]` — Moves berry to `archive/{{primary-tag}}/` folder, appears in Available Archives
-- `[RETRIEVE #tag]` — Queues archived berries to load at next session start
+| Marker | Effect |
+|--------|--------|
+| `[BERRY #tag] insight` | Adds to Active Berries (knowledge) |
+| `[ARCHIVE id]` | Moves berry to archive by primary tag |
+| `[RETRIEVE #tag]` | Loads archived berries next session |
+| `[AUTOBERRY] state` | Saves checkpoint below (overwrites previous) |
 
-### When to Capture (Triggers)
-Berry **in the moment**—not as cleanup. Pause and write a marker when you:
-- Discover a file/component is critical or safe to delete
-- Find a non-obvious dependency or integration point
-- Learn a user preference or workflow constraint
-- Uncover *why* something was built a certain way
-- Realize the next Claude would ask the same question you just answered
+### When to Write
+**Berries** (knowledge) — capture when the next Claude would ask the same question:
+- Critical files, non-obvious dependencies, user preferences, why something was built a certain way
 
-### Freshness Guidelines
-- Keep ~10-15 active berries; archive when context becomes background knowledge
-- Archive completed features/resolved issues; retrieve when revisiting that work
-- Primary tag (first tag) determines archive folder
+**Autoberries** (task state) — capture current work to resume later:
+- When you see `⏰` prompt or user runs `member save`
+- Before complex multi-step work
+- Format: `[AUTOBERRY] <goal> | <progress> | <next steps>`
 
-**No active berries?** You're the first Claude here. Capture architecture, gotchas, and conventions *immediately*—don't wait until end of session.
+### On Session Start
+1. **Checkpoint exists?** → Acknowledge and continue from that state
+2. **No checkpoint?** → Starting fresh; read Active Berries for context
+3. **No berries?** → First session; capture architecture and conventions now
 
-### Examples
-<!-- EXAMPLE_ONLY -->
-```
-[BERRY #auth] User prefers JWT over sessions; stateless API
-[ARCHIVE 79dcac83]
-[RETRIEVE #auth]
-```
+---
 
-*Humans are short on time. You are short on energy. Memberberries helps both.*
-
+{checkpoint_section}
 ## Active Berries
 {active_berries}
 
-## Available Archives
+## Archives
 {archive_summary}
 
-## Session Context
-*Last sync: {sync_time}*
-
+*Synced: {sync_time}*
 <!-- END MEMBERBERRIES -->'''
 
 
@@ -177,6 +184,22 @@ def format_archive_summary(summary: Dict[str, int]) -> str:
     return ' · '.join(f"`#{tag}` ({count})" for tag, count in sorted(summary.items()))
 
 
+def format_checkpoint_section(autoberry: Optional[Dict]) -> str:
+    """Format checkpoint section. Prominent, appears before Active Berries."""
+    if not autoberry:
+        return ""
+
+    timestamp = autoberry.get('timestamp', '')[:16].replace('T', ' ')
+    content = autoberry.get('content', '')
+
+    return f'''## 📍 Checkpoint
+**[{timestamp}]** {content}
+
+↳ *Continue from here. Write `[AUTOBERRY]` to update.*
+
+'''
+
+
 def format_retrieved_berries(berries: List[Dict], tag: str) -> str:
     """Format retrieved berries for injection."""
     if not berries:
@@ -196,6 +219,7 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
 
     # Load data
     active = load_active_berries(project_path)
+    autoberry = load_autoberry(project_path)
     archive_summary = get_archive_summary(project_path)
     pending_retrieves = get_pending_retrieves(project_path)
 
@@ -208,6 +232,7 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
 
     # Build memberberries section
     memberberries_section = MEMBERBERRIES_SECTION_TEMPLATE.format(
+        checkpoint_section=format_checkpoint_section(autoberry),
         active_berries=format_active_berries(active),
         archive_summary=format_archive_summary(archive_summary),
         sync_time=datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -293,19 +318,20 @@ exit 0
     concentrate_script.write_text(concentrate_content)
     os.chmod(concentrate_script, 0o755)
 
-    # Create nudge hook (gentle reminder after substantive responses)
+    # Create nudge hook (gentle reminder after substantive responses + autoberry timing)
     nudge_script = hooks_dir / "berry-nudge.sh"
     nudge_content = f'''#!/bin/bash
-# Memberberries nudge hook - gentle reminder after substantive responses
+# Memberberries nudge hook - gentle reminder after substantive responses + autoberry timing
 
 INPUT=$(cat)
 TRANSCRIPT=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
+PROJECT_DIR="{project_path}"
 
 if [ -z "$TRANSCRIPT" ]; then
   exit 0
 fi
 
-NUDGE=$(python3 "{MEMBERBERRIES_DIR}/berry_nudge.py" "$TRANSCRIPT" 2>/dev/null)
+NUDGE=$(python3 "{MEMBERBERRIES_DIR}/berry_nudge.py" "$TRANSCRIPT" "$PROJECT_DIR" 2>/dev/null)
 if [ -n "$NUDGE" ]; then
   echo "$NUDGE"
 fi
@@ -448,6 +474,25 @@ def cmd_launch(args):
     os.execvp("claude", ["claude"])
 
 
+def cmd_save(args):
+    """Prompt Claude to create an autoberry checkpoint.
+
+    Outputs a message that will be shown to Claude, prompting it to write
+    an [AUTOBERRY] marker capturing current session state.
+    """
+    print("""
+💾 **Checkpoint requested**
+
+Please write an `[AUTOBERRY]` marker now capturing your current session state.
+
+Format: `[AUTOBERRY] <current goal> | <progress made> | <next steps>`
+
+Example: `[AUTOBERRY] Implementing auth flow | Login endpoint done, refresh token WIP | Next: add token rotation, write tests`
+
+This checkpoint will be shown prominently at the start of your next session so you can resume seamlessly.
+""")
+
+
 def cmd_upgrade(args):
     """Pull latest memberberries and re-sync CLAUDE.md template (preserves berries)."""
     import subprocess
@@ -475,6 +520,10 @@ def cmd_upgrade(args):
         print(f"✗ Could not update: {e}")
         return
 
+    # Regenerate hooks with latest scripts
+    setup_hooks(project_path)
+    print("✓ Hooks updated")
+
     # Re-sync to apply new template
     count = sync_claude_md(project_path)
     print(f"🫐 Re-synced {count} berries with latest template")
@@ -487,7 +536,7 @@ def main():
     )
 
     parser.add_argument('command', nargs='?', default='launch',
-                       choices=['launch', 'setup', 'status', 'sync', 'upgrade'],
+                       choices=['launch', 'setup', 'status', 'sync', 'upgrade', 'save'],
                        help='Command to run')
     parser.add_argument('--project', '-p', help='Project path')
     parser.add_argument('--query', '-q', help='Search query for context')
@@ -511,6 +560,8 @@ def main():
         cmd_sync(args)
     elif args.command == 'upgrade':
         cmd_upgrade(args)
+    elif args.command == 'save':
+        cmd_save(args)
     else:
         cmd_launch(args)
 
