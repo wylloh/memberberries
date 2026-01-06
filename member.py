@@ -370,12 +370,12 @@ exit 0
 
     settings["hooks"] = {
         "UserPromptSubmit": [{
-            "hooks": [{"type": "command", "command": str(sync_script)}]
+            "hooks": [{"type": "command", "command": f'"{sync_script}"'}]
         }],
         "Stop": [{
             "hooks": [
-                {"type": "command", "command": str(concentrate_script)},
-                {"type": "command", "command": str(nudge_script)}
+                {"type": "command", "command": f'"{concentrate_script}"'},
+                {"type": "command", "command": f'"{nudge_script}"'}
             ]
         }]
     }
