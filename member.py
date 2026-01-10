@@ -104,6 +104,86 @@ def get_pending_retrieves(project_path: Path) -> List[str]:
     return []
 
 
+def get_pending_recalls(project_path: Path) -> List[str]:
+    """Get queries requested for semantic recall."""
+    recall_file = project_path / ".memberberries" / "pending_recalls.json"
+    if recall_file.exists():
+        try:
+            with open(recall_file, 'r') as f:
+                queries = json.load(f)
+            # Clear after reading
+            recall_file.unlink()
+            return queries
+        except Exception:
+            return []
+    return []
+
+
+def search_berries(project_path: Path, query: str, k: int = 5) -> List[Dict]:
+    """Search berries using the configured backend.
+
+    Returns list of (berry, score, source) dicts.
+    """
+    try:
+        from backends import get_backend
+        backend = get_backend(project_path)
+        results = backend.search(query, k)
+        return [
+            {
+                'berry': r.berry.to_dict(),
+                'score': r.score,
+                'source': r.source
+            }
+            for r in results
+        ]
+    except ImportError:
+        # Fall back to simple keyword search if backends not available
+        return _keyword_search(project_path, query, k)
+
+
+def _keyword_search(project_path: Path, query: str, k: int = 5) -> List[Dict]:
+    """Simple keyword search fallback."""
+    import re
+    query_lower = query.lower()
+    query_words = set(re.findall(r'\w+', query_lower))
+
+    results = []
+
+    # Search active berries
+    for berry in load_active_berries(project_path):
+        text = f"{berry.get('summary', '')} {' '.join(berry.get('tags', []))}".lower()
+        text_words = set(re.findall(r'\w+', text))
+
+        # Calculate score
+        if query_lower in text:
+            score = 1.0
+        else:
+            overlap = len(query_words & text_words)
+            score = overlap / len(query_words) if query_words else 0
+
+        if score > 0:
+            results.append({'berry': berry, 'score': score, 'source': 'active'})
+
+    # Search archived berries
+    for tag, count in get_archive_summary(project_path).items():
+        for berry in load_archived_berries(project_path, tag):
+            text = f"{berry.get('summary', '')} {' '.join(berry.get('tags', []))}".lower()
+            text_words = set(re.findall(r'\w+', text))
+
+            if query_lower in text:
+                score = 1.0
+            else:
+                overlap = len(query_words & text_words)
+                score = overlap / len(query_words) if query_words else 0
+
+            if score > 0:
+                results.append({'berry': berry, 'score': score, 'source': 'archive'})
+
+    # Sort by score, take top k
+    results.sort(key=lambda r: r['score'], reverse=True)
+    return results[:k]
+
+
 # =============================================================================
 # CLAUDE.md Management
 # =============================================================================
@@ -128,6 +208,8 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 **You lose memory between sessions. Berries let you leave notes for your next self.**
 
+📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
+
 The Active Berries below are insights your past self preserved. When you discover something through effort—a gotcha, a preference, how things connect—berry it so the next Claude skips the re-discovery.
 
 ### Markers
@@ -135,21 +217,29 @@ Write in responses. Hooks persist automatically.
 
 | Marker | Effect | Why use it |
 |--------|--------|------------|
-| `[BERRY #tag] insight` | Saves to Active Berries | Skip re-deriving this next session |
+| `[BERRY:type #tag] insight` | Saves with category | Clear intent: gotcha, preference, decision, pattern, rule, architecture |
+| `[BERRY #tag] insight` | Saves to Active Berries | Freeform when type doesn't fit |
 | `[ARCHIVE id]` | Moves to archive folder | Declutter active; still retrievable |
 | `[RETRIEVE #tag]` | Loads archived berries | Pull back context when relevant |
+| `[RECALL query]` | Semantic search | Find related berries without exact tags |
 | `[AUTOBERRY] state` | Saves checkpoint below | Resume mid-task next session |
 
-### When to Berry
-**Trigger:** "I just spent effort learning something not obvious from the code."
+### Berry Types
+Use structured types to reduce decision fatigue:
 
-Examples worth capturing:
-- User preferences: `[BERRY #pref] User prefers JWT over sessions`
-- Gotchas you hit: `[BERRY #gotcha] Must run X before Y or tests fail`
-- Non-obvious connections: `[BERRY #arch] Service A calls B via queue, not directly`
-- Decisions: `[BERRY #decision] Chose X over Y because Z`
+| Type | When to use | Example |
+|------|-------------|---------|
+| `gotcha` | Something that tripped you up | `[BERRY:gotcha] Must run migrations before tests` |
+| `preference` | User preference or choice | `[BERRY:preference] User wants dark mode by default` |
+| `decision` | Why X was chosen over Y | `[BERRY:decision] Chose Redis over Memcached for pub/sub` |
+| `pattern` | Recurring code/design pattern | `[BERRY:pattern] All API routes use middleware chain` |
+| `rule` | A rule to follow | `[BERRY:rule] Never commit .env files` |
+| `architecture` | System structure insight | `[BERRY:architecture] Auth service is separate microservice` |
 
-**Don't berry:** File locations, function signatures, things grep finds instantly.
+**Trigger phrases** (if you say these, consider berrying):
+- "I just discovered..." / "I found that..."
+- "The user prefers..." / "They want..."
+- "This failed because..." / "The gotcha is..."
 
 ### When to Autoberry
 **Format:** `[AUTOBERRY] <goal> | <progress> | <next step>`
@@ -192,8 +282,13 @@ def format_active_berries(berries: List[Dict]) -> str:
     for b in berries:
         date = b.get('created', '')[:10]
         tags = ' '.join(f"#{t}" for t in b.get('tags', []))
+
+        # Show structured type if present
+        berry_type = b.get('type')
+        type_prefix = f"[{berry_type}] " if berry_type else ""
+
         summary = b.get('summary', '')[:100]
-        lines.append(f"- `{b['id']}` [{date}] {tags}: {summary}")
+        lines.append(f"- `{b['id']}` [{date}] {type_prefix}{tags}: {summary}")
     return '\n'.join(lines)
 
 
@@ -233,6 +328,53 @@ def format_retrieved_berries(berries: List[Dict], tag: str) -> str:
     return '\n'.join(lines)
 
 
+def format_recalled_berries(results: List[Dict], query: str) -> str:
+    """Format semantic search results for injection."""
+    if not results:
+        return ""
+
+    lines = [f"\n## Recalled: \"{query}\""]
+    for r in results:
+        b = r['berry']
+        score = r['score']
+        source = r['source']
+        date = b.get('created', '')[:10]
+
+        # Show type if present
+        berry_type = b.get('type')
+        type_prefix = f"[{berry_type}] " if berry_type else ""
+
+        tags = ' '.join(f"#{t}" for t in b.get('tags', []))
+        source_tag = f"({source})" if source == "archive" else ""
+
+        lines.append(f"- `{b['id']}` [{date}] {type_prefix}{tags}: {b.get('summary', '')} {source_tag}")
+    return '\n'.join(lines)
+
+
+def format_checkpoint_status(autoberry: Optional[Dict]) -> str:
+    """Format checkpoint status for the header line."""
+    if not autoberry:
+        return "none"
+
+    timestamp = autoberry.get('timestamp', '')
+    if not timestamp:
+        return "set"
+
+    try:
+        dt = datetime.fromisoformat(timestamp)
+        age = datetime.now() - dt
+        minutes = int(age.total_seconds() / 60)
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        days = hours // 24
+        return f"{days}d ago"
+    except Exception:
+        return "set"
+
+
 def sync_claude_md(project_path: Path, query: str = None) -> int:
     """Sync berries to CLAUDE.md. Returns count of active berries."""
     claude_md_path = project_path / "CLAUDE.md"
@@ -242,27 +384,44 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
     autoberry = load_autoberry(project_path)
     archive_summary = get_archive_summary(project_path)
     pending_retrieves = get_pending_retrieves(project_path)
+    pending_recalls = get_pending_recalls(project_path)
 
-    # Build retrieved berries section
+    # Calculate counts for header
+    berry_count = len(active)
+    archive_count = sum(archive_summary.values())
+    checkpoint_status = format_checkpoint_status(autoberry)
+
+    # Build retrieved berries section (exact tag match)
     retrieved_sections = []
     for tag in pending_retrieves:
         retrieved = load_archived_berries(project_path, tag)
         if retrieved:
             retrieved_sections.append(format_retrieved_berries(retrieved, tag))
 
+    # Build recalled berries section (semantic/keyword search)
+    recalled_sections = []
+    for recall_query in pending_recalls:
+        results = search_berries(project_path, recall_query, k=5)
+        if results:
+            recalled_sections.append(format_recalled_berries(results, recall_query))
+
     # Build memberberries section
     memberberries_section = MEMBERBERRIES_SECTION_TEMPLATE.format(
+        berry_count=berry_count,
+        archive_count=archive_count,
+        checkpoint_status=checkpoint_status,
         checkpoint_section=format_checkpoint_section(autoberry),
         active_berries=format_active_berries(active),
         archive_summary=format_archive_summary(archive_summary),
         sync_time=datetime.now().strftime('%Y-%m-%d %H:%M')
     )
 
-    # Add retrieved berries if any
-    if retrieved_sections:
+    # Insert retrieved and recalled berries before Active Berries section
+    injection_sections = retrieved_sections + recalled_sections
+    if injection_sections:
         memberberries_section = memberberries_section.replace(
-            "## Session Context",
-            '\n'.join(retrieved_sections) + "\n\n## Session Context"
+            "## Active Berries",
+            '\n'.join(injection_sections) + "\n\n## Active Berries"
         )
 
     # Read existing CLAUDE.md or create new

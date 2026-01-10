@@ -24,9 +24,56 @@ MIN_RESPONSE_LENGTH = 800
 # Autoberry timing: nudge after this many minutes of active work
 AUTOBERRY_INTERVAL_MINUTES = 15
 
-# Berry marker patterns
-BERRY_PATTERN = re.compile(r'\[BERRY\s+#\w+[^\]]*\]')
-AUTOBERRY_PATTERN = re.compile(r'\[AUTOBERRY\]')
+# Berry marker patterns (both structured and freeform)
+BERRY_PATTERN = re.compile(r'\[BERRY[:\s][^\]]*\]', re.IGNORECASE)
+AUTOBERRY_PATTERN = re.compile(r'\[AUTOBERRY\]', re.IGNORECASE)
+
+# Trigger phrases that suggest berry-worthy insights
+# When Claude says these but doesn't berry, we nudge with a specific suggestion
+TRIGGER_PATTERNS = [
+    # Discovery triggers → suggest gotcha or pattern
+    (re.compile(r"I (?:just )?(?:discovered|found|learned|realized|noticed) (?:that )?", re.IGNORECASE), "gotcha"),
+    (re.compile(r"(?:It turns out|Turns out|Interestingly|Surprisingly)", re.IGNORECASE), "gotcha"),
+    (re.compile(r"The (?:issue|problem|bug|error) (?:is|was) ", re.IGNORECASE), "gotcha"),
+
+    # Preference triggers → suggest preference
+    (re.compile(r"(?:The user|You) (?:prefer|want|like|need)s? ", re.IGNORECASE), "preference"),
+    (re.compile(r"(?:They|You) (?:mentioned|said|indicated|specified) ", re.IGNORECASE), "preference"),
+    (re.compile(r"(?:Your|Their) preference ", re.IGNORECASE), "preference"),
+
+    # Decision triggers → suggest decision
+    (re.compile(r"(?:I |We )?(?:chose|decided|went with|opted for|picked) ", re.IGNORECASE), "decision"),
+    (re.compile(r"(?:I |We )?(?:recommend|suggest)(?:ing|ed)? (?:using |that )?", re.IGNORECASE), "decision"),
+    (re.compile(r"(?:The reason|This is because|Because) ", re.IGNORECASE), "decision"),
+
+    # Rule/pattern triggers → suggest rule or pattern
+    (re.compile(r"(?:Always|Never|Must|Should always|Should never) ", re.IGNORECASE), "rule"),
+    (re.compile(r"(?:The pattern|The convention|The standard) (?:is|here) ", re.IGNORECASE), "pattern"),
+    (re.compile(r"(?:This codebase|This project|This repo) (?:uses|follows|requires) ", re.IGNORECASE), "pattern"),
+
+    # Architecture triggers → suggest architecture
+    (re.compile(r"(?:The architecture|The structure|The system) ", re.IGNORECASE), "architecture"),
+    (re.compile(r"(?:communicates? with|connects? to|depends? on|calls?) ", re.IGNORECASE), "architecture"),
+]
+
+
+def detect_trigger_phrases(text: str) -> list[tuple[str, str]]:
+    """Detect trigger phrases in text.
+
+    Returns list of (matched_phrase, suggested_type) tuples.
+    """
+    matches = []
+    for pattern, suggested_type in TRIGGER_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            # Get some context around the match
+            start = max(0, match.start() - 20)
+            end = min(len(text), match.end() + 50)
+            context = text[start:end].replace('\n', ' ').strip()
+            if len(context) > 60:
+                context = context[:57] + "..."
+            matches.append((context, suggested_type))
+    return matches
 
 
 def get_last_exchange(transcript_path: str) -> tuple[list[str], str]:
@@ -68,11 +115,18 @@ def get_last_exchange(transcript_path: str) -> tuple[list[str], str]:
     return tools_used, assistant_text
 
 
-def should_nudge_berry(tools_used: list[str], assistant_text: str) -> bool:
-    """Determine if a berry nudge is warranted."""
+def should_nudge_berry(tools_used: list[str], assistant_text: str) -> tuple[bool, list[tuple[str, str]]]:
+    """Determine if a berry nudge is warranted.
+
+    Returns (should_nudge, trigger_matches) where trigger_matches is a list of
+    (context, suggested_type) tuples from detected trigger phrases.
+    """
     # Already berried? No nudge needed
     if BERRY_PATTERN.search(assistant_text):
-        return False
+        return False, []
+
+    # Check for trigger phrases first (most specific nudge)
+    triggers = detect_trigger_phrases(assistant_text)
 
     # Check for exploration tools
     exploration_count = len(set(tools_used) & EXPLORATION_TOOLS)
@@ -81,15 +135,17 @@ def should_nudge_berry(tools_used: list[str], assistant_text: str) -> bool:
     text_length = len(assistant_text)
 
     # Nudge criteria (discovery-focused):
-    # - Multiple exploration tools used (deep dive)
-    # - Single exploration + long response (investigation with analysis)
-    # Pure explanations without exploration don't trigger nudge
+    # 1. Trigger phrases detected (regardless of tools)
+    # 2. Multiple exploration tools used (deep dive)
+    # 3. Single exploration + long response (investigation with analysis)
+    if triggers:
+        return True, triggers
     if exploration_count >= 2:
-        return True
+        return True, []
     if exploration_count >= 1 and text_length >= MIN_RESPONSE_LENGTH:
-        return True
+        return True, []
 
-    return False
+    return False, []
 
 
 def get_project_path_from_transcript(transcript_path: str) -> Path:
@@ -203,8 +259,16 @@ def main():
         return
 
     # Check for regular berry nudge
-    if should_nudge_berry(tools_used, assistant_text):
-        print("🫐 Anything worth berrying?")
+    should_nudge, triggers = should_nudge_berry(tools_used, assistant_text)
+    if should_nudge:
+        if triggers:
+            # Specific nudge based on detected trigger phrase
+            # Use the first trigger as the primary suggestion
+            context, suggested_type = triggers[0]
+            print(f"🫐 Berry this {suggested_type}? `[BERRY:{suggested_type}]`")
+        else:
+            # Generic nudge for exploration without trigger phrases
+            print("🫐 Anything worth berrying?")
 
 
 if __name__ == '__main__':

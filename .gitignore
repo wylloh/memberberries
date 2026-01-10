@@ -45,3 +45,6 @@ Thumbs.db
 
 # CLAUDE.md is auto-generated per user by memberberries
 CLAUDE.md
+
+# Decision documents (internal notes)
+DECISION_SUMMARY.md

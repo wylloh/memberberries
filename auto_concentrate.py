@@ -59,25 +59,66 @@ def strip_code_blocks(text: str) -> str:
     return text
 
 
+# Valid structured berry types (reduces cognitive load by providing clear categories)
+BERRY_TYPES = {'gotcha', 'preference', 'decision', 'pattern', 'rule', 'architecture'}
+
+
 def parse_berry_markers(text: str) -> List[Dict]:
-    """Parse [BERRY #tag1 #tag2] summary patterns."""
+    """Parse berry markers in two formats:
+
+    Structured (new): [BERRY:gotcha #tag] insight
+    Freeform (original): [BERRY #tag1 #tag2] insight
+
+    Structured types: gotcha, preference, decision, pattern, rule, architecture
+    """
     # Strip code blocks to avoid capturing documentation examples
     text = strip_code_blocks(text)
 
-    # Support both [BERRY] and legacy [MEMORY]
-    # Summary captures until newline
-    pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^\n]+)'
-    matches = re.finditer(pattern, text, re.IGNORECASE)
-
     berries = []
-    for match in matches:
+
+    # Pattern 1: Structured type [BERRY:type #tags] or [BERRY:type] (tags optional)
+    # Example: [BERRY:gotcha #audio] SA63-7 discontinued
+    # Example: [BERRY:preference] User wants dark mode
+    structured_pattern = r'\[BERRY:(\w+)(?:\s+((?:#\w+\s*)*))?]\s*([^\n]+)'
+    for match in re.finditer(structured_pattern, text, re.IGNORECASE):
+        berry_type = match.group(1).lower()
+        tag_str = match.group(2) or ''
+        summary = match.group(3).strip()
+
+        if not summary:
+            continue
+
+        # Validate type (fall back to freeform if invalid)
+        if berry_type not in BERRY_TYPES:
+            continue
+
+        tags = re.findall(r'#(\w+)', tag_str)
+
+        berries.append({
+            'id': hashlib.md5(f"{summary}{datetime.now().isoformat()}".encode()).hexdigest()[:8],
+            'type': berry_type,
+            'tags': tags,
+            'summary': summary,
+            'created': datetime.now().isoformat(),
+        })
+
+    # Pattern 2: Freeform [BERRY #tag1 #tag2] (original format, backward compat)
+    # Also supports legacy [MEMORY]
+    freeform_pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^\n]+)'
+    for match in re.finditer(freeform_pattern, text, re.IGNORECASE):
         tags = re.findall(r'#(\w+)', match.group(1))
         summary = match.group(2).strip()
+
         if not summary or not tags:
+            continue
+
+        # Skip if already captured by structured pattern (same summary)
+        if any(b['summary'] == summary for b in berries):
             continue
 
         berries.append({
             'id': hashlib.md5(f"{summary}{datetime.now().isoformat()}".encode()).hexdigest()[:8],
+            'type': None,  # Freeform berries have no structured type
             'tags': tags,
             'summary': summary,
             'created': datetime.now().isoformat(),
@@ -96,6 +137,32 @@ def parse_retrieve_markers(text: str) -> List[str]:
     """Parse [RETRIEVE #tag] patterns."""
     pattern = r'\[RETRIEVE\s+#(\w+)\]'
     return re.findall(pattern, text, re.IGNORECASE)
+
+
+def parse_recall_markers(text: str) -> List[str]:
+    """Parse [RECALL query] patterns for semantic search.
+
+    Examples:
+        [RECALL speaker selection rules]
+        [RECALL "audio surround setup"]
+        [RECALL authentication flow]
+    """
+    # Strip code blocks first
+    text = strip_code_blocks(text)
+
+    # Match [RECALL query] or [RECALL "query with spaces"]
+    patterns = [
+        r'\[RECALL\s+"([^"]+)"\]',  # Quoted query
+        r"\[RECALL\s+'([^']+)'\]",  # Single-quoted query
+        r'\[RECALL\s+([^\]]+)\]',   # Unquoted query
+    ]
+
+    queries = []
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        queries.extend(match.strip() for match in matches if match.strip())
+
+    return queries
 
 
 def parse_autoberry_marker(text: str) -> Optional[str]:
@@ -187,12 +254,13 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
 
     text = extract_assistant_text(transcript_path)
     if not text:
-        return {'berries': 0, 'archives': 0, 'retrieves': 0, 'autoberry': 0}
+        return {'berries': 0, 'archives': 0, 'retrieves': 0, 'recalls': 0, 'autoberry': 0}
 
     # Parse all markers
     new_berries = parse_berry_markers(text)
     archive_ids = parse_archive_markers(text)
     retrieve_tags = parse_retrieve_markers(text)
+    recall_queries = parse_recall_markers(text)
     autoberry_content = parse_autoberry_marker(text)
 
     # Load current active berries
@@ -230,10 +298,17 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
         with open(retrieve_file, 'w') as f:
             json.dump(retrieve_tags, f)
 
+    # Store recall queries for next sync (semantic search)
+    if recall_queries:
+        recall_file = project_path / ".memberberries" / "pending_recalls.json"
+        with open(recall_file, 'w') as f:
+            json.dump(recall_queries, f)
+
     return {
         'berries': len(new_berries),
         'archives': archived_count,
         'retrieves': len(retrieve_tags),
+        'recalls': len(recall_queries),
         'autoberry': autoberry_saved
     }
 
@@ -250,12 +325,14 @@ def main():
     result = process_transcript(args.transcript, project_path)
 
     # Log results (visible in debug log)
-    if result['berries'] > 0 or result['archives'] > 0 or result['autoberry'] > 0:
+    if result['berries'] > 0 or result['archives'] > 0 or result['recalls'] > 0 or result['autoberry'] > 0:
         parts = []
         if result['berries']:
             parts.append(f"{result['berries']} new")
         if result['archives']:
             parts.append(f"{result['archives']} archived")
+        if result['recalls']:
+            parts.append(f"{result['recalls']} recalls queued")
         if result['autoberry']:
             parts.append("checkpoint saved")
         print(f"🫐 Processed: {', '.join(parts)}")
