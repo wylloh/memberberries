@@ -69,6 +69,8 @@ class SemanticBackend(MemoryBackend):
     def model(self) -> 'SentenceTransformer':
         """Lazy load the embedding model."""
         if self._model is None:
+            import sys
+            print(f"Loading semantic model ({self._model_name})...", file=sys.stderr)
             self._model = SentenceTransformer(self._model_name)
         return self._model
 

@@ -10,7 +10,7 @@ Claude Code sessions are ephemeral—context resets on every conversation. Membe
 
 ## Philosophy
 
-**Claude manages the memories.** No embeddings, no search algorithms, no AI trying to guess what's relevant. Claude decides what to remember, what to archive, and what to retrieve. The system just handles file I/O.
+**Claude manages the memories.** Claude decides what to remember, what to archive, and what to retrieve. The system handles file I/O. Semantic search via `[RECALL]` is opt-in for when you need to find related berries without exact tags.
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ member
 
 ## How It Works
 
-### Four Markers
+### Five Markers
 
 Claude writes these in responses. Hooks parse and persist them.
 
@@ -39,6 +39,7 @@ Claude writes these in responses. Hooks parse and persist them.
 | `[BERRY #tag] insight` | Save knowledge to Active Berries |
 | `[ARCHIVE id]` | Move berry to archive folder |
 | `[RETRIEVE #tag]` | Pull archived berries into context |
+| `[RECALL query]` | Semantic search across all berries |
 | `[AUTOBERRY] state` | Save task checkpoint (overwrites previous) |
 
 ### Session Flow
@@ -93,10 +94,21 @@ Everything is JSON. No black boxes.
 
 - Python 3.8+
 - Claude Code CLI
+- `sentence-transformers` (optional, for `[RECALL]` semantic search)
+
+### Semantic Search
+
+`[RECALL]` uses sentence-transformers for semantic similarity search. To enable:
+
+```bash
+pip install sentence-transformers
+```
+
+**Note:** First use downloads the embedding model (~80MB). You'll see "Loading semantic model..." on cold start. Subsequent uses are instant.
 
 ## Design
 
-~800 lines of Python. No dependencies beyond stdlib. Just file I/O and regex.
+~800 lines of Python. Core functionality uses stdlib only (file I/O and regex). Semantic search is the one optional dependency.
 
 The system is scaffolding for Claude—structure and automation, not intelligence. Claude provides the intelligence.
 

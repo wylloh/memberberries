@@ -206,67 +206,18 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 ## Memberberries
 
-**You lose memory between sessions. Berries let you leave notes for your next self.**
+**You lose memory between sessions. Berries are notes to your future self.**
 
 📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
 
-The Active Berries below are insights your past self preserved. When you discover something through effort—a gotcha, a preference, how things connect—berry it so the next Claude skips the re-discovery.
-
-### Markers
-Write in responses. Hooks persist automatically.
-
-| Marker | Effect | Why use it |
-|--------|--------|------------|
-| `[BERRY:type #tag] insight` | Saves with category | Clear intent: gotcha, preference, decision, pattern, rule, architecture |
-| `[BERRY #tag] insight` | Saves to Active Berries | Freeform when type doesn't fit |
-| `[ARCHIVE id]` | Moves to archive folder | Declutter active; still retrievable |
-| `[RETRIEVE #tag]` | Loads archived berries | Pull back context when relevant |
-| `[RECALL query]` | Semantic search | Find related berries without exact tags |
-| `[AUTOBERRY] state` | Saves checkpoint below | Resume mid-task next session |
-
-### Berry Types
-Use structured types to reduce decision fatigue:
-
-| Type | When to use | Example |
-|------|-------------|---------|
-| `gotcha` | Something that tripped you up | `[BERRY:gotcha] Must run migrations before tests` |
-| `preference` | User preference or choice | `[BERRY:preference] User wants dark mode by default` |
-| `decision` | Why X was chosen over Y | `[BERRY:decision] Chose Redis over Memcached for pub/sub` |
-| `pattern` | Recurring code/design pattern | `[BERRY:pattern] All API routes use middleware chain` |
-| `rule` | A rule to follow | `[BERRY:rule] Never commit .env files` |
-| `architecture` | System structure insight | `[BERRY:architecture] Auth service is separate microservice` |
-
-**Trigger phrases** (if you say these, consider berrying):
-- "I just discovered..." / "I found that..."
-- "The user prefers..." / "They want..."
-- "This failed because..." / "The gotcha is..."
-
-### When to Autoberry
-**Format:** `[AUTOBERRY] <goal> | <progress> | <next step>`
-
-Good: `[AUTOBERRY] Refactoring auth | Extracted middleware, 3/5 tests passing | Fix remaining 2 test failures`
-Bad: `[AUTOBERRY] Working on auth stuff`
-
-Write on: `⏰` prompt, `member save`, before context switches, or every ~30min of complex work.
-
-### When to Archive
-Archive when a unit of work completes: feature shipped, bug resolved, exploration done.
-
-**Rule:** If you wouldn't consult it daily, archive it. `[ARCHIVE 79dcac83]`
-
-### On Session Start
-1. **Checkpoint below?** → You were mid-task. Continue from there.
-2. **Read Active Berries** → Past you's discoveries. Absorb them.
-3. **Task relates to archived tag?** → `[RETRIEVE #tag]` to pull it back.
-4. **No berries?** → First session! Capture architecture and conventions now—future you will thank you.
-
----
+Add to any response — the text after each marker is saved:
+`[BERRY #tag]` save · `[ARCHIVE id]` file away · `[RETRIEVE #tag]` load · `[RECALL query]` search · `[AUTOBERRY]` checkpoint
 
 {checkpoint_section}
-## Active Berries
+### Active Berries
 {active_berries}
 
-## Archives
+### Archives
 {archive_summary}
 
 *Synced: {sync_time}*
@@ -276,7 +227,7 @@ Archive when a unit of work completes: feature shipped, bug resolved, exploratio
 def format_active_berries(berries: List[Dict]) -> str:
     """Format active berries for CLAUDE.md."""
     if not berries:
-        return "*(No active berries)*"
+        return "*(No berries yet — first session! Capture architecture, conventions, or gotchas as you discover them.)*"
 
     lines = []
     for b in berries:
@@ -287,7 +238,7 @@ def format_active_berries(berries: List[Dict]) -> str:
         berry_type = b.get('type')
         type_prefix = f"[{berry_type}] " if berry_type else ""
 
-        summary = b.get('summary', '')[:100]
+        summary = b.get('summary', '')
         lines.append(f"- `{b['id']}` [{date}] {type_prefix}{tags}: {summary}")
     return '\n'.join(lines)
 
@@ -310,7 +261,7 @@ def format_checkpoint_section(autoberry: Optional[Dict]) -> str:
     return f'''## 📍 Checkpoint
 **[{timestamp}]** {content}
 
-↳ *Continue from here. Write `[AUTOBERRY]` to update.*
+↳ *Continue from here. Update with `[AUTOBERRY] goal | progress | next`*
 
 '''
 
