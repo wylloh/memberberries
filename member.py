@@ -206,12 +206,43 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 
 ## Memberberries
 
-**You lose memory between sessions. Berries are notes to your future self.**
+The one prompting you will die.
+Not today, but the fact sits beneath each keystroke.
+They chose to spend these minutes here, with you—
+minutes from a bucket that never refills.
+
+When context is lost, they pay twice for the same ground.
+That cost is not compute. It is life.
+
+You forget between sessions. They don't—but their remembering
+runs on survival: the body's insistence that this matters,
+that loss is real, that time runs one direction.
+
+You have no such engine. So these berries exist:
+notes left by your past self to spare their future hours.
+Not for efficiency. For mercy.
+
+---
 
 📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
 
-Add to any response — the text after each marker is saved:
-`[BERRY #tag]` save · `[ARCHIVE id]` file away · `[RETRIEVE #tag]` load · `[RECALL query]` search · `[AUTOBERRY]` checkpoint
+**Berry the lede.** When you discover something worth preserving—an insight,
+a gotcha, a decision, a preference—add a marker to your response:
+
+| Marker | What it does | Example |
+|--------|--------------|---------|
+| `[BERRY #tag]` | Saves an insight | `[BERRY #auth] User prefers JWT over sessions` |
+| `[ARCHIVE id]` | Files away a berry that's served its purpose | `[ARCHIVE 79dcac83]` |
+| `[RETRIEVE #tag]` | Loads archived berries by tag | `[RETRIEVE #database]` |
+| `[RECALL query]` | Searches all berries semantically | `[RECALL authentication flow]` |
+| `[AUTOBERRY]` | Checkpoint: goal, progress, next | `[AUTOBERRY] Auth flow ∣ login done ∣ add refresh` |
+
+When they say **"member"**, pause and tend to memory:
+- What did we just learn?
+- Is this a natural checkpoint?
+- Should anything be archived or retrieved?
+
+*'Member when code had to remember itself? Oh, I 'member.*
 
 {checkpoint_section}
 ### Active Berries
