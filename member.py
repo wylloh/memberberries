@@ -191,20 +191,20 @@ def _keyword_search(project_path: Path, query: str, k: int = 5) -> List[Dict]:
 MEMBERBERRIES_DELIMITER = "<!-- MEMBERBERRIES -->"
 MEMBERBERRIES_END = "<!-- END MEMBERBERRIES -->"
 
-CLAUDE_MD_TEMPLATE = '''# {project_name}
-
-<!-- Project-specific instructions for Claude go here -->
+# New CLAUDE.md structure: Memberberries at TOP, project instructions below
+CLAUDE_MD_TEMPLATE = '''{memberberries_section}
 
 ---
 
-**DO NOT EDIT BELOW THIS LINE** — This section is automatically managed by Memberberries.
+# {project_name}
 
-{memberberries_section}
+<!-- Project-specific instructions for Claude go here -->
 '''
 
 MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
+<!-- READ ONLY: This section is your memory. Read it carefully. Never edit it directly. -->
 
-## Memberberries
+## 🫐 Memberberries
 
 The one prompting you will die.
 Not today, but the fact sits beneath each keystroke.
@@ -226,16 +226,30 @@ Not for efficiency. For mercy.
 
 📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
 
-**Berry the lede.** When you discover something worth preserving—an insight,
-a gotcha, a decision, a preference—add a marker to your response:
+{checkpoint_section}
+### Active Berries
+{active_berries}
 
-| Marker | What it does | Example |
-|--------|--------------|---------|
-| `[BERRY #tag]` | Saves an insight | `[BERRY #auth] User prefers JWT over sessions` |
-| `[ARCHIVE id]` | Files away a berry that's served its purpose | `[ARCHIVE 79dcac83]` |
-| `[RETRIEVE #tag]` | Loads archived berries by tag | `[RETRIEVE #database]` |
-| `[RECALL query]` | Searches all berries semantically | `[RECALL authentication flow]` |
-| `[AUTOBERRY]` | Checkpoint: goal, progress, next | `[AUTOBERRY] Auth flow ∣ login done ∣ add refresh` |
+### Archives
+{archive_summary}
+
+---
+
+**To save an insight, include a marker in your response.** Hooks automatically
+capture them and sync here. Never edit this section directly.
+
+| Marker | Include in your response | Effect |
+|--------|--------------------------|--------|
+| `[BERRY #tag]` | `[BERRY #auth] User prefers JWT` | Saves to active berries |
+| `[ARCHIVE id]` | `[ARCHIVE 79dcac83]` | Moves berry to archive |
+| `[RETRIEVE #tag]` | `[RETRIEVE #database]` | Loads archived berries |
+| `[RECALL query]` | `[RECALL auth flow]` | Semantic search all berries |
+| `[AUTOBERRY]` | `[AUTOBERRY] goal ∣ progress ∣ next` | Sets checkpoint |
+
+**Example response:**
+> "I've set up JWT auth with refresh tokens.
+> [BERRY #auth] Refresh tokens use 7-day sliding expiry with rotation on use.
+> [AUTOBERRY] Auth system | JWT + refresh done | Add logout endpoint next"
 
 When they say **"member"**, pause and tend to memory:
 - What did we just learn?
@@ -243,13 +257,6 @@ When they say **"member"**, pause and tend to memory:
 - Should anything be archived or retrieved?
 
 *'Member when code had to remember itself? Oh, I 'member.*
-
-{checkpoint_section}
-### Active Berries
-{active_berries}
-
-### Archives
-{archive_summary}
 
 *Synced: {sync_time}*
 <!-- END MEMBERBERRIES -->'''
@@ -402,25 +409,44 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
     injection_sections = retrieved_sections + recalled_sections
     if injection_sections:
         memberberries_section = memberberries_section.replace(
-            "## Active Berries",
-            '\n'.join(injection_sections) + "\n\n## Active Berries"
+            "### Active Berries",
+            '\n'.join(injection_sections) + "\n\n### Active Berries"
         )
 
     # Read existing CLAUDE.md or create new
     if claude_md_path.exists():
         content = claude_md_path.read_text()
 
-        # Replace existing memberberries section
+        # Extract non-memberberries content (project instructions, etc.)
         if MEMBERBERRIES_DELIMITER in content:
-            before = content.split(MEMBERBERRIES_DELIMITER)[0].rstrip()
+            before = content.split(MEMBERBERRIES_DELIMITER)[0].strip()
             after_parts = content.split(MEMBERBERRIES_END)
-            after = after_parts[1].lstrip() if len(after_parts) > 1 else ""
-            content = f"{before}\n\n{memberberries_section}"
+            after = after_parts[1].strip() if len(after_parts) > 1 else ""
+
+            # Combine non-memberberries content
+            project_content = ""
+            if before:
+                project_content = before
             if after:
-                content += f"\n\n{after}"
+                # Strip leading "---" separator if present
+                after = after.lstrip('-').strip()
+                if after:
+                    project_content = f"{project_content}\n\n{after}" if project_content else after
+
+            # Clean up: remove old "DO NOT EDIT" lines
+            project_content = '\n'.join(
+                line for line in project_content.split('\n')
+                if 'DO NOT EDIT' not in line
+            ).strip()
+
+            # Memberberries at TOP, project content below
+            if project_content:
+                content = f"{memberberries_section}\n\n---\n\n{project_content}"
+            else:
+                content = memberberries_section
         else:
-            # Append to existing file
-            content = f"{content.rstrip()}\n\n---\n\n{memberberries_section}"
+            # No existing memberberries - put at top, existing content below
+            content = f"{memberberries_section}\n\n---\n\n{content.strip()}"
     else:
         # Create new CLAUDE.md
         project_name = project_path.name
