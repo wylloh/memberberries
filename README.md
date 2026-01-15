@@ -30,13 +30,14 @@ member
 
 ## How It Works
 
-### Five Markers
+### Six Markers
 
 Claude writes these in responses. Hooks parse and persist them.
 
 | Marker | Effect |
 |--------|--------|
-| `[BERRY #tag] insight` | Save knowledge to Active Berries |
+| `[BERRY #tag] insight` | Save to Active Berries (global) |
+| `[BERRY #tag @path] insight` | Anchor to location (spatial memory) |
 | `[ARCHIVE id]` | Move berry to archive folder |
 | `[RETRIEVE #tag]` | Pull archived berries into context |
 | `[RECALL query]` | Semantic search across all berries |
@@ -48,20 +49,52 @@ Claude writes these in responses. Hooks parse and persist them.
 2. **Work**: Claude references berries, creates new ones
 3. **End**: Markers parsed, files updated
 
+### Spatial Memory
+
+Anchor berries to locations with `@path`:
+
+```
+[BERRY #gotcha @src/auth/] JWT refresh tokens need rotation on use
+```
+
+This creates `MEMBERME.md` files in those directories—breadcrumbs Claude discovers while exploring the codebase. Like a memory palace, but for code.
+
+```
+src/
+├── auth/
+│   ├── MEMBERME.md      # "Here's what I know about this area"
+│   ├── jwt.ts
+│   └── session.ts
+└── api/
+    └── routes.ts
+```
+
+- Global berries (no `@path`): Show in CLAUDE.md at session start
+- Located berries (`@path`): Discovered during navigation
+
 ### What Claude Sees
 
+In CLAUDE.md at session start:
 ```markdown
 ## 📍 Checkpoint
 **[2026-01-04 15:30]** Implementing auth | Login done | Next: token refresh
 
-↳ Continue from here. Write `[AUTOBERRY]` to update.
-
 ## Active Berries
 - `a1b2c3d4` [2026-01-04] #auth: JWT in httpOnly cookies, not localStorage
-- `b2c3d4e5` [2026-01-04] #debugging: Check nginx logs first for 502 errors
+- `b2c3d4e5` [2026-01-04] #debugging: Check nginx logs first for 502 @src/api/
 
 ## Archives
 `#architecture` (3) · `#deployment` (5)
+```
+
+In `src/api/MEMBERME.md` while exploring:
+```markdown
+# 🫐 Memories for this area
+
+- `b2c3d4e5` [2026-01-04] #debugging: Check nginx logs first for 502 errors
+
+---
+*Add memories here with: `[BERRY #tag @src/api/] Your insight`*
 ```
 
 ## Storage
@@ -69,15 +102,20 @@ Claude writes these in responses. Hooks parse and persist them.
 ```
 your-project/
 ├── CLAUDE.md                    # Instructions + active berries
+├── src/
+│   └── auth/
+│       └── MEMBERME.md          # Spatial breadcrumbs (gitignored)
 └── .memberberries/
-    ├── active.json              # Current berries
+    ├── active.json              # Current berries (source of truth)
     └── archive/                 # By primary tag
         ├── architecture/
         ├── deployment/
         └── debugging/
 ```
 
-Everything is JSON. No black boxes.
+- `active.json` is the source of truth for all berries
+- `MEMBERME.md` files are auto-generated projections (gitignored)
+- Everything is JSON. No black boxes.
 
 ## Commands
 

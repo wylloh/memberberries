@@ -64,26 +64,28 @@ BERRY_TYPES = {'gotcha', 'preference', 'decision', 'pattern', 'rule', 'architect
 
 
 def parse_berry_markers(text: str) -> List[Dict]:
-    """Parse berry markers in two formats:
+    """Parse berry markers in two formats with optional spatial anchoring:
 
-    Structured (new): [BERRY:gotcha #tag] insight
-    Freeform (original): [BERRY #tag1 #tag2] insight
+    Structured (new): [BERRY:gotcha #tag @path/to/file] insight
+    Freeform (original): [BERRY #tag1 #tag2 @path/to/dir/] insight
 
     Structured types: gotcha, preference, decision, pattern, rule, architecture
+    Path anchoring: Optional @path at end of marker brackets for spatial memory
     """
     # Strip code blocks to avoid capturing documentation examples
     text = strip_code_blocks(text)
 
     berries = []
 
-    # Pattern 1: Structured type [BERRY:type #tags] or [BERRY:type] (tags optional)
-    # Example: [BERRY:gotcha #audio] SA63-7 discontinued
+    # Pattern 1: Structured type [BERRY:type #tags @path] or [BERRY:type] (tags/path optional)
+    # Example: [BERRY:gotcha #audio @src/audio/player.ts] SA63-7 discontinued
     # Example: [BERRY:preference] User wants dark mode
-    structured_pattern = r'\[BERRY:(\w+)(?:\s+((?:#\w+\s*)*))?]\s*([^\n]+)'
+    structured_pattern = r'\[BERRY:(\w+)(?:\s+((?:#\w+\s*)*))(?:\s+@([^\]\s]+))?\]\s*([^\n]+)'
     for match in re.finditer(structured_pattern, text, re.IGNORECASE):
         berry_type = match.group(1).lower()
         tag_str = match.group(2) or ''
-        summary = match.group(3).strip()
+        path = match.group(3)  # May be None
+        summary = match.group(4).strip()
 
         if not summary:
             continue
@@ -94,20 +96,25 @@ def parse_berry_markers(text: str) -> List[Dict]:
 
         tags = re.findall(r'#(\w+)', tag_str)
 
-        berries.append({
+        berry = {
             'id': hashlib.md5(f"{summary}{datetime.now().isoformat()}".encode()).hexdigest()[:8],
             'type': berry_type,
             'tags': tags,
             'summary': summary,
             'created': datetime.now().isoformat(),
-        })
+        }
+        if path:
+            berry['path'] = path
+        berries.append(berry)
 
-    # Pattern 2: Freeform [BERRY #tag1 #tag2] (original format, backward compat)
+    # Pattern 2: Freeform [BERRY #tag1 #tag2 @path] (original format, backward compat)
     # Also supports legacy [MEMORY]
-    freeform_pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)\]\s*([^\n]+)'
+    # Example: [BERRY #auth @src/auth/] User prefers JWT
+    freeform_pattern = r'\[(?:BERRY|MEMORY)\s+((?:#\w+\s*)+)(?:@([^\]\s]+))?\]\s*([^\n]+)'
     for match in re.finditer(freeform_pattern, text, re.IGNORECASE):
         tags = re.findall(r'#(\w+)', match.group(1))
-        summary = match.group(2).strip()
+        path = match.group(2)  # May be None
+        summary = match.group(3).strip()
 
         if not summary or not tags:
             continue
@@ -116,13 +123,16 @@ def parse_berry_markers(text: str) -> List[Dict]:
         if any(b['summary'] == summary for b in berries):
             continue
 
-        berries.append({
+        berry = {
             'id': hashlib.md5(f"{summary}{datetime.now().isoformat()}".encode()).hexdigest()[:8],
             'type': None,  # Freeform berries have no structured type
             'tags': tags,
             'summary': summary,
             'created': datetime.now().isoformat(),
-        })
+        }
+        if path:
+            berry['path'] = path
+        berries.append(berry)
 
     return berries
 
