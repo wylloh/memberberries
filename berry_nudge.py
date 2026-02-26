@@ -24,6 +24,12 @@ MIN_RESPONSE_LENGTH = 800
 # Autoberry timing: nudge after this many minutes of active work
 AUTOBERRY_INTERVAL_MINUTES = 15
 
+# Archive nudge: suggest archiving when active count exceeds this
+ARCHIVE_THRESHOLD = 20
+
+# Berry types that should never be suggested for archiving
+PERMANENT_TYPES = {'preference', 'rule'}
+
 # Berry marker patterns (both structured and freeform)
 BERRY_PATTERN = re.compile(r'\[BERRY[:\s][^\]]*\]', re.IGNORECASE)
 AUTOBERRY_PATTERN = re.compile(r'\[AUTOBERRY\]', re.IGNORECASE)
@@ -243,6 +249,39 @@ def should_nudge_autoberry(tools_used: list[str], assistant_text: str, project_p
     return False
 
 
+def should_nudge_archive(project_path: Path) -> tuple[bool, list[dict], int]:
+    """Check if active berry count exceeds threshold and suggest candidates.
+
+    Returns (should_nudge, candidates, total_count) where candidates are
+    the top 5 stalest non-permanent berries.
+    """
+    active_file = project_path / ".memberberries" / "active.json"
+    if not active_file.exists():
+        return False, [], 0
+
+    try:
+        with open(active_file, 'r') as f:
+            data = json.load(f)
+        berries = data.get("berries", []) if isinstance(data, dict) else data
+    except Exception:
+        return False, [], 0
+
+    total = len(berries)
+    if total <= ARCHIVE_THRESHOLD:
+        return False, [], total
+
+    # Filter out permanent types
+    candidates = [
+        b for b in berries
+        if b.get('type') not in PERMANENT_TYPES
+    ]
+
+    # Sort by staleness: last_referenced (or created) ascending (oldest first)
+    candidates.sort(key=lambda b: b.get('last_referenced') or b.get('created', ''))
+
+    return True, candidates[:5], total
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(0)
@@ -269,6 +308,18 @@ def main():
         else:
             # Generic nudge for exploration without trigger phrases
             print("🫐 Anything worth berrying?")
+        return
+
+    # Check for archive nudge (lowest priority)
+    nudge_archive, candidates, total = should_nudge_archive(project_path)
+    if nudge_archive:
+        lines = [f"📦 {total} active berries (threshold: {ARCHIVE_THRESHOLD}). Consider archiving:"]
+        for b in candidates:
+            summary = b.get('summary', '')
+            if len(summary) > 50:
+                summary = summary[:47] + "..."
+            lines.append(f"  `[ARCHIVE {b['id']}]` {summary}")
+        print('\n'.join(lines))
 
 
 if __name__ == '__main__':
