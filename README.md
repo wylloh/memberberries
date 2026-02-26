@@ -146,7 +146,7 @@ pip install sentence-transformers
 
 ## Design
 
-~800 lines of Python. Core functionality uses stdlib only (file I/O and regex). Semantic search is the one optional dependency.
+~2300 lines of Python. Core functionality uses stdlib only (file I/O and regex). Semantic search is the one optional dependency.
 
 The system is scaffolding for Claude—structure and automation, not intelligence. Claude provides the intelligence.
 
