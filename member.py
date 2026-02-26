@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import shutil
@@ -184,6 +185,38 @@ def _keyword_search(project_path: Path, query: str, k: int = 5) -> List[Dict]:
     return results[:k]
 
 
+def update_last_referenced(berries: List[Dict], query: str) -> bool:
+    """Update last_referenced timestamp on berries matching the query.
+
+    Extracts tags and significant words from each berry, checks for overlap
+    with the lowercased query. Returns True if any berry was updated.
+    """
+    if not query or not berries:
+        return False
+
+    query_words = set(re.findall(r'\w+', query.lower()))
+    if not query_words:
+        return False
+
+    now = datetime.now().isoformat()
+    changed = False
+
+    for berry in berries:
+        # Build word set from tags + significant summary words
+        berry_words = set()
+        for tag in berry.get('tags', []):
+            berry_words.add(tag.lower())
+        for word in re.findall(r'\w+', berry.get('summary', '').lower()):
+            if len(word) > 3:
+                berry_words.add(word)
+
+        if berry_words & query_words:
+            berry['last_referenced'] = now
+            changed = True
+
+    return changed
+
+
 # =============================================================================
 # CLAUDE.md Management
 # =============================================================================
@@ -267,26 +300,54 @@ When they say **"member"**, pause and tend to memory:
 <!-- END MEMBERBERRIES -->'''
 
 
+MAX_RENDERED_BERRIES = 20
+
+
+def _format_berry_line(b: Dict) -> str:
+    """Format a single berry as a markdown list item."""
+    date = b.get('created', '')[:10]
+    tags = ' '.join(f"#{t}" for t in b.get('tags', []))
+
+    berry_type = b.get('type')
+    type_prefix = f"[{berry_type}] " if berry_type else ""
+
+    path = b.get('path')
+    path_suffix = f" @{path}" if path else ""
+
+    summary = b.get('summary', '')
+    return f"- `{b['id']}` [{date}] {type_prefix}{tags}: {summary}{path_suffix}"
+
+
 def format_active_berries(berries: List[Dict]) -> str:
-    """Format active berries for CLAUDE.md."""
+    """Format active berries for CLAUDE.md.
+
+    Sorts newest-first. Renders up to MAX_RENDERED_BERRIES in full,
+    collapses overflow into a tag summary to nudge archiving.
+    """
     if not berries:
         return "*(No berries yet — first session! Capture architecture, conventions, or gotchas as you discover them.)*"
 
-    lines = []
-    for b in berries:
-        date = b.get('created', '')[:10]
-        tags = ' '.join(f"#{t}" for t in b.get('tags', []))
+    # Sort newest-first (ISO timestamps sort lexicographically)
+    sorted_berries = sorted(berries, key=lambda b: b.get('created', ''), reverse=True)
 
-        # Show structured type if present
-        berry_type = b.get('type')
-        type_prefix = f"[{berry_type}] " if berry_type else ""
+    # Render full lines for the newest berries
+    rendered = sorted_berries[:MAX_RENDERED_BERRIES]
+    lines = [_format_berry_line(b) for b in rendered]
 
-        # Show path if anchored (spatial memory)
-        path = b.get('path')
-        path_suffix = f" @{path}" if path else ""
+    # Collapse overflow into tag summary
+    overflow = sorted_berries[MAX_RENDERED_BERRIES:]
+    if overflow:
+        tag_counts: Dict[str, int] = {}
+        for b in overflow:
+            for tag in b.get('tags', []):
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        tag_summary = ' · '.join(
+            f"`#{tag}` ({count})"
+            for tag, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+        )
+        lines.append(f"\n### Older Berries ({len(overflow)} berries — archive with `[ARCHIVE id]`)")
+        lines.append(tag_summary)
 
-        summary = b.get('summary', '')
-        lines.append(f"- `{b['id']}` [{date}] {type_prefix}{tags}: {summary}{path_suffix}")
     return '\n'.join(lines)
 
 
@@ -493,10 +554,18 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
     """Sync berries to CLAUDE.md. Returns count of active berries."""
     claude_md_path = project_path / "CLAUDE.md"
 
-    # Load data
-    active = load_active_berries(project_path)
-    autoberry = load_autoberry(project_path)
+    # Load full storage once so we can update in place
+    storage = load_storage(project_path)
+    active = storage.get("berries", [])
+    autoberry = storage.get("autoberry")
     archive_summary = get_archive_summary(project_path)
+
+    # Update last_referenced for berries matching the query
+    if query and update_last_referenced(active, query):
+        active_file = project_path / ".memberberries" / "active.json"
+        with open(active_file, 'w') as f:
+            json.dump(storage, f, indent=2)
+
     pending_retrieves = get_pending_retrieves(project_path)
     pending_recalls = get_pending_recalls(project_path)
 

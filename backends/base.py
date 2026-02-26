@@ -18,6 +18,8 @@ class Berry:
     created: str
     type: Optional[str] = None  # gotcha, preference, decision, pattern, rule, architecture
     archived: Optional[str] = None
+    path: Optional[str] = None
+    last_referenced: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -31,6 +33,10 @@ class Berry:
             d['type'] = self.type
         if self.archived:
             d['archived'] = self.archived
+        if self.path:
+            d['path'] = self.path
+        if self.last_referenced:
+            d['last_referenced'] = self.last_referenced
         return d
 
     @classmethod
@@ -43,6 +49,8 @@ class Berry:
             created=d.get('created', ''),
             type=d.get('type'),
             archived=d.get('archived'),
+            path=d.get('path'),
+            last_referenced=d.get('last_referenced'),
         )
 
 
