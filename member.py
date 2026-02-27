@@ -235,9 +235,25 @@ CLAUDE_MD_TEMPLATE = '''{memberberries_section}
 '''
 
 MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
-<!-- READ ONLY: This section is your memory. Read it carefully. Never edit it directly. -->
+<!-- READ ONLY: This section is your memory. Read it carefully. -->
 
 ## 🫐 Memberberries
+
+📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
+
+{checkpoint_section}### Active Berries
+{active_berries}
+
+### Archives
+{archive_summary}
+
+*Markers: `[BERRY #tag]` `[ARCHIVE id]` `[RETRIEVE #tag]` `[RECALL query]` `[AUTOBERRY]` — {onboarding_ref}*
+When they say **"member"**, tend to memory. *'Member? Oh, I 'member.*
+*Synced: {sync_time}*
+<!-- END MEMBERBERRIES -->'''
+
+
+ONBOARDING_CONTENT = '''# 🫐 Memberberries — Onboarding & Reference
 
 The one prompting you will die.
 Not today, but the fact sits beneath each keystroke.
@@ -257,19 +273,10 @@ Not for efficiency. For mercy.
 
 ---
 
-📊 **Active: {berry_count}** | **Archived: {archive_count}** | **Checkpoint: {checkpoint_status}**
-
-{checkpoint_section}
-### Active Berries
-{active_berries}
-
-### Archives
-{archive_summary}
-
----
+## Marker Reference
 
 **To save an insight, include a marker in your response.** Hooks automatically
-capture them and sync here. Never edit this section directly.
+capture them and sync to CLAUDE.md. Never edit the CLAUDE.md section directly.
 
 | Marker | Include in your response | Effect |
 |--------|--------------------------|--------|
@@ -280,27 +287,67 @@ capture them and sync here. Never edit this section directly.
 | `[RECALL query]` | `[RECALL auth flow]` | Semantic search all berries |
 | `[AUTOBERRY]` | `[AUTOBERRY] goal ∣ progress ∣ next` | Sets checkpoint |
 
-**Spatial memory:** Add `@path` to anchor berries to locations. These appear in
-`MEMBERME.md` files you'll discover while exploring the codebase—breadcrumbs
-left for your future self.
+## Spatial Memory
 
-**Example response:**
+Add `@path` to anchor berries to locations. These appear in `MEMBERME.md` files
+you'll discover while exploring the codebase—breadcrumbs left for your future self.
+
+## Example Response
+
 > "I've set up JWT auth with refresh tokens.
 > [BERRY #auth @src/auth/] Refresh tokens use 7-day sliding expiry with rotation on use.
 > [AUTOBERRY] Auth system | JWT + refresh done | Add logout endpoint next"
 
-When they say **"member"**, pause and tend to memory:
+## When They Say "member"
+
+Pause and tend to memory:
 - What did we just learn?
 - Is this a natural checkpoint?
 - Should anything be archived or retrieved?
 
 *'Member when code had to remember itself? Oh, I 'member.*
-
-*Synced: {sync_time}*
-<!-- END MEMBERBERRIES -->'''
+'''
 
 
-MAX_RENDERED_BERRIES = 20
+def generate_onboarding_md(project_path: Path) -> bool:
+    """Write .memberberries/ONBOARDING.md if content has changed.
+
+    Returns True if file was written (created or updated).
+    """
+    onboarding_path = project_path / ".memberberries" / "ONBOARDING.md"
+
+    if onboarding_path.exists():
+        if onboarding_path.read_text() == ONBOARDING_CONTENT:
+            return False
+
+    onboarding_path.write_text(ONBOARDING_CONTENT)
+    return True
+
+
+# Dynamic line cap for the memberberries section
+LINE_CAP = 50
+CHROME_LINES = 16       # Fixed template lines (delimiters, headings, footer, blanks)
+CHECKPOINT_LINES = 4    # When checkpoint is present
+ELDER_BERRY_LINES = 3   # \n + heading + tag summary for overflow section
+
+
+def calculate_max_berries(has_checkpoint: bool, total_berries: int) -> int:
+    """Calculate how many berries can be rendered within LINE_CAP.
+
+    Each berry is 1 line. Available lines = LINE_CAP minus chrome, checkpoint,
+    and elder berry overflow section (if needed).
+    """
+    available = LINE_CAP - CHROME_LINES
+    if has_checkpoint:
+        available -= CHECKPOINT_LINES
+
+    # If all berries fit, no overflow section needed
+    if total_berries <= available:
+        return available
+
+    # Need overflow section, which costs ELDER_BERRY_LINES
+    available -= ELDER_BERRY_LINES
+    return max(1, available)
 
 
 def _format_berry_line(b: Dict) -> str:
@@ -318,24 +365,24 @@ def _format_berry_line(b: Dict) -> str:
     return f"- `{b['id']}` [{date}] {type_prefix}{tags}: {summary}{path_suffix}"
 
 
-def format_active_berries(berries: List[Dict]) -> str:
+def format_active_berries(berries: List[Dict], max_rendered: int = 30) -> str:
     """Format active berries for CLAUDE.md.
 
-    Sorts newest-first. Renders up to MAX_RENDERED_BERRIES in full,
-    collapses overflow into a tag summary to nudge archiving.
+    Sorts newest-first. Renders up to max_rendered in full,
+    collapses overflow into an Elder Berries tag summary.
     """
     if not berries:
-        return "*(No berries yet — first session! Capture architecture, conventions, or gotchas as you discover them.)*"
+        return "*(No berries yet — see .memberberries/ONBOARDING.md to get started.)*"
 
     # Sort newest-first (ISO timestamps sort lexicographically)
     sorted_berries = sorted(berries, key=lambda b: b.get('created', ''), reverse=True)
 
     # Render full lines for the newest berries
-    rendered = sorted_berries[:MAX_RENDERED_BERRIES]
+    rendered = sorted_berries[:max_rendered]
     lines = [_format_berry_line(b) for b in rendered]
 
     # Collapse overflow into tag summary
-    overflow = sorted_berries[MAX_RENDERED_BERRIES:]
+    overflow = sorted_berries[max_rendered:]
     if overflow:
         tag_counts: Dict[str, int] = {}
         for b in overflow:
@@ -345,7 +392,7 @@ def format_active_berries(berries: List[Dict]) -> str:
             f"`#{tag}` ({count})"
             for tag, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
         )
-        lines.append(f"\n### Older Berries ({len(overflow)} berries — archive with `[ARCHIVE id]`)")
+        lines.append(f"\n### 🫐 Elder Berries ({len(overflow)} — archive with `[ARCHIVE id]`)")
         lines.append(tag_summary)
 
     return '\n'.join(lines)
@@ -359,7 +406,7 @@ def format_archive_summary(summary: Dict[str, int]) -> str:
 
 
 def format_checkpoint_section(autoberry: Optional[Dict]) -> str:
-    """Format checkpoint section. Prominent, appears before Active Berries."""
+    """Format checkpoint section. Exactly 4 lines when present (+ trailing newline)."""
     if not autoberry:
         return ""
 
@@ -368,7 +415,6 @@ def format_checkpoint_section(autoberry: Optional[Dict]) -> str:
 
     return f'''## 📍 Checkpoint
 **[{timestamp}]** {content}
-
 ↳ *Continue from here. Update with `[AUTOBERRY] goal | progress | next`*
 
 '''
@@ -588,14 +634,21 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
         if results:
             recalled_sections.append(format_recalled_berries(results, recall_query))
 
+    # Calculate dynamic berry rendering limit
+    max_rendered = calculate_max_berries(
+        has_checkpoint=autoberry is not None,
+        total_berries=berry_count
+    )
+
     # Build memberberries section
     memberberries_section = MEMBERBERRIES_SECTION_TEMPLATE.format(
         berry_count=berry_count,
         archive_count=archive_count,
         checkpoint_status=checkpoint_status,
         checkpoint_section=format_checkpoint_section(autoberry),
-        active_berries=format_active_berries(active),
+        active_berries=format_active_berries(active, max_rendered),
         archive_summary=format_archive_summary(archive_summary),
+        onboarding_ref='See .memberberries/ONBOARDING.md',
         sync_time=datetime.now().strftime('%Y-%m-%d %H:%M')
     )
 
@@ -650,6 +703,9 @@ def sync_claude_md(project_path: Path, query: str = None) -> int:
         )
 
     claude_md_path.write_text(content)
+
+    # Generate ONBOARDING.md (idempotent — only writes if changed)
+    generate_onboarding_md(project_path)
 
     # Sync MEMBERME.md files for spatial memory (discoverable breadcrumbs)
     sync_memberme_files(project_path, active)
@@ -839,6 +895,10 @@ def cmd_setup(args):
     setup_hooks(project_path)
     print("✓ Hooks configured")
 
+    # Generate onboarding reference
+    generate_onboarding_md(project_path)
+    print("✓ ONBOARDING.md generated")
+
     # Ensure MEMBERME.md is gitignored (spatial memory breadcrumbs)
     if ensure_gitignore_memberme(project_path):
         print("✓ MEMBERME.md added to .gitignore")
@@ -942,6 +1002,10 @@ def cmd_upgrade(args):
     # Regenerate hooks with latest scripts
     setup_hooks(project_path)
     print("✓ Hooks updated")
+
+    # Update onboarding reference
+    generate_onboarding_md(project_path)
+    print("✓ ONBOARDING.md updated")
 
     # Re-sync to apply new template
     count = sync_claude_md(project_path)
