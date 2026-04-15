@@ -137,10 +137,14 @@ def parse_berry_markers(text: str) -> List[Dict]:
     return berries
 
 
-def parse_archive_markers(text: str) -> List[str]:
-    """Parse [ARCHIVE id] patterns."""
-    pattern = r'\[ARCHIVE\s+([a-f0-9]{8})\]'
-    return re.findall(pattern, text, re.IGNORECASE)
+def parse_archive_markers(text: str) -> List[tuple]:
+    """Parse [ARCHIVE id] and [ARCHIVE id resolved:<ref>] patterns.
+
+    Returns list of (id, resolved_by) tuples. resolved_by is None if absent.
+    The <ref> can be a commit SHA, PR number, URL, or any whitespace-free token.
+    """
+    pattern = r'\[ARCHIVE\s+([a-f0-9]{8})(?:\s+resolved:(\S+?))?\]'
+    return [(m.group(1), m.group(2)) for m in re.finditer(pattern, text, re.IGNORECASE)]
 
 
 def parse_retrieve_markers(text: str) -> List[str]:
@@ -286,9 +290,11 @@ def process_transcript(transcript_path: str, project_path: str) -> Dict[str, int
 
     # Archive requested berries
     archived_count = 0
-    for berry_id in archive_ids:
+    for berry_id, resolved_by in archive_ids:
         if berry_id in active_by_id:
             berry = active_by_id[berry_id]
+            if resolved_by:
+                berry['resolved_by'] = resolved_by
             archive_berry(project_path, berry)
             active = [b for b in active if b['id'] != berry_id]
             archived_count += 1

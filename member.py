@@ -247,7 +247,7 @@ MEMBERBERRIES_SECTION_TEMPLATE = '''<!-- MEMBERBERRIES -->
 ### Archives
 {archive_summary}
 
-*Markers: `[BERRY #tag]` `[ARCHIVE id]` `[RETRIEVE #tag]` `[RECALL query]` `[AUTOBERRY]` — {onboarding_ref}*
+*Drop `[BERRY #tag]` when you notice something worth remembering — the hook handles the rest. Also: `[ARCHIVE id]` `[RETRIEVE #tag]` `[RECALL query]` `[AUTOBERRY]` — {onboarding_ref}*
 When they say **"member"**, tend to memory. *'Member? Oh, I 'member.*
 *Synced: {sync_time}*
 <!-- END MEMBERBERRIES -->'''
@@ -283,6 +283,7 @@ capture them and sync to CLAUDE.md. Never edit the CLAUDE.md section directly.
 | `[BERRY #tag]` | `[BERRY #auth] User prefers JWT` | Saves to active berries (global) |
 | `[BERRY #tag @path]` | `[BERRY #auth @src/auth/] JWT here` | Anchors to location (spatial) |
 | `[ARCHIVE id]` | `[ARCHIVE 79dcac83]` | Moves berry to archive |
+| `[ARCHIVE id resolved:<ref>]` | `[ARCHIVE 79dcac83 resolved:abc1234]` | Archives with a fix link (commit/PR/URL) |
 | `[RETRIEVE #tag]` | `[RETRIEVE #database]` | Loads archived berries |
 | `[RECALL query]` | `[RECALL auth flow]` | Semantic search all berries |
 | `[AUTOBERRY]` | `[AUTOBERRY] goal ∣ progress ∣ next` | Sets checkpoint |
